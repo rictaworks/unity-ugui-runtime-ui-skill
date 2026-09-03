@@ -1,0 +1,121 @@
+// ============================================================================
+// UiBatchCompileCheck.cs.tmpl
+//
+// これは本スキルが生成するテンプレートの中で唯一 UnityEditor 名前空間の
+// 使用が許されるテンプレートである。
+//
+// 配置先: Assets/Editor/UiBatchCompileCheck.cs （このディレクトリ配下にのみ置く）
+// 実行時コード（Assets/Scripts/ 配下）には絶対に配置してはならない。
+// 本クラスは GUI を持たない。OnGUI・EditorWindow・Editor拡張のUIは実装しない。
+//
+// 用途:
+//   Unity CLI から以下の形式で -executeMethod を用いて呼び出し、
+//   スクリプトのコンパイル結果確認と PlayMode テストの起動を行う。
+//
+//     Unity -batchmode -nographics -quit -projectPath <path> \
+//       -executeMethod {{PROJECT_NAMESPACE}}.EditorTools.UiBatchCompileCheck.CompileAndTest \
+//       -logFile <logPath>
+//
+//   呼び出し側（scripts/unity_batch_compile.py 相当）は、生成されたログの
+//   `error CS` の有無と本メソッドが設定する終了コードでコンパイル可否・
+//   テスト可否を判定する。
+//
+// 置換対象（{{ }} 部分）:
+//   {{PROJECT_NAMESPACE}}    ... 本プロジェクトの Editor ツール用名前空間
+//   {{TEST_ASSEMBLY_NAMES}}  ... 実行対象の Test Assembly 名（例: "Assets.Tests.PlayMode"）
+//
+// 注意:
+//   ・本ファイルは資格情報・メールアドレス・実在の個人名を含まない。
+//   ・AssetDatabase への書き込みは行わない（読み取り専用の確認のみ）。
+// ============================================================================
+
+using UnityEditor;
+using UnityEditor.TestTools.TestRunner.Api;
+using UnityEngine;
+
+namespace {{PROJECT_NAMESPACE}}.EditorTools
+{
+    /// <summary>
+    /// Unity CLI（-batchmode -nographics -quit -executeMethod）専用の
+    /// コンパイル確認・PlayModeテスト起動クラス。
+    /// GUI 操作を一切前提とせず、Assets/Editor/ 配下にのみ配置する。
+    /// </summary>
+    public static class UiBatchCompileCheck
+    {
+        // 実行対象の Test Assembly 名。プロジェクトのテストアセンブリ定義（.asmdef）に合わせて置換する。
+        private static readonly string[] TargetTestAssemblyNames = { "{{TEST_ASSEMBLY_NAMES}}" };
+
+        // シェル側（unity_batch_compile.py 相当）が成否判定に用いる終了コード。
+        private const int ExitCodeSuccess = 0;
+        private const int ExitCodeCompileError = 1;
+        private const int ExitCodeTestFailure = 2;
+
+        /// <summary>
+        /// -executeMethod から呼び出すエントリポイント。
+        /// 1) スクリプトコンパイルが失敗していないかを確認する。
+        /// 2) 失敗していれば即座に終了コードを設定して終了する。
+        /// 3) 成功していれば PlayMode テストの実行を起動する。
+        /// </summary>
+        public static void CompileAndTest()
+        {
+            if (EditorUtility.scriptCompilationFailed)
+            {
+                Debug.LogError("error CS: スクリプトのコンパイルに失敗したため、テストの実行を中止する。詳細は本ログの直前の出力を参照すること。");
+                EditorApplication.Exit(ExitCodeCompileError);
+                return;
+            }
+
+            StartPlayModeTests();
+        }
+
+        private static void StartPlayModeTests()
+        {
+            var api = ScriptableObject.CreateInstance<TestRunnerApi>();
+            api.RegisterCallbacks(new BatchTestCallbacks());
+
+            var filter = new Filter
+            {
+                testMode = TestMode.PlayMode,
+                assemblyNames = TargetTestAssemblyNames,
+            };
+
+            api.Execute(new ExecutionSettings(filter));
+        }
+
+        /// <summary>
+        /// TestRunnerApi のコールバックを受け、テスト完了時に
+        /// Unity プロセスを終了コード付きで終了する。
+        /// </summary>
+        private sealed class BatchTestCallbacks : ICallbacks
+        {
+            public void RunStarted(ITestAdaptor testsToRun)
+            {
+                Debug.Log($"PlayModeテストを開始する。対象テスト数: {testsToRun.TestCaseCount}");
+            }
+
+            public void RunFinished(ITestResultAdaptor result)
+            {
+                bool succeeded = result.TestStatus != TestStatus.Failed;
+
+                if (!succeeded)
+                {
+                    Debug.LogError($"PlayModeテストが失敗した。失敗数: {result.FailCount}");
+                }
+
+                EditorApplication.Exit(succeeded ? ExitCodeSuccess : ExitCodeTestFailure);
+            }
+
+            public void TestStarted(ITestAdaptor test)
+            {
+            }
+
+            public void TestFinished(ITestResultAdaptor result)
+            {
+                if (result.TestStatus == TestStatus.Failed)
+                {
+                    Debug.LogError($"テスト失敗: {result.FullName}\n{result.Message}");
+                }
+            }
+        }
+    }
+}
