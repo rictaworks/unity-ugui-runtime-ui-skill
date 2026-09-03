@@ -59,10 +59,11 @@ CodexとAntigravityは同じ `.agents/skills` を読むため、ワークスペ�
 
 | バージョン | `.skill` ハッシュ | 設置日 | 備考 |
 |---|---|---|---|
-| （未リリース） | — | — | — |
+| 0.1.0 | `sha256:9e453ae3aff69726883291da21228c27d95531852453f4ae120812492eaefe18` | 未設置 | [GitHub Release 0.1.0](https://github.com/rictaworks/unity-ugui-runtime-ui-skill/releases/tag/0.1.0) 添付の `unity-ugui-runtime-ui-0.1.0.skill`。各ホストへの設置（12.2節・13.3節5.）が行われた時点で「設置日」を追記する |
 
 ## 更新履歴
 
 | 日付 | 内容 |
 |---|---|
+| 2026-09-04 | 0.1.0 リリース。`.skill` ハッシュを配布済みバージョン対応表に記録 |
 | 2026-09-03 | 初版作成。設置先一覧・設置方法を requirements.md 2.3節・12.2節から反映。既知の挙動差なし |
