@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 from skill_common import (
+    FrontmatterError,
     SKILLS_DIR,
     find_host_specific_fields,
     find_skill_md_files,
@@ -155,7 +156,14 @@ def check_file(path: Path, forbidden_name_patterns: List["re.Pattern[str]"]) -> 
 def check_host_specific_frontmatter_fields() -> List[str]:
     errors = []
     for skill_md_path in find_skill_md_files():
-        frontmatter = load_skill_frontmatter(skill_md_path)
+        try:
+            frontmatter = load_skill_frontmatter(skill_md_path)
+        except FrontmatterError as e:
+            # validate_frontmatter.py の validate_one() と同じメッセージ形式に揃える。
+            # 1件の不正なSKILL.mdでスクリプト全体をクラッシュさせず、他のファイルの
+            # 検査は継続する。
+            errors.append(f"{skill_md_path}: フロントマターの解析に失敗した: {e}")
+            continue
         host_specific = find_host_specific_fields(frontmatter)
         if host_specific:
             errors.append(
