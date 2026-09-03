@@ -8,7 +8,7 @@ Unity（WebGL）でuGUI画面を実行するときの、解像度・アスペク
 不変条件2（`EventSystem`と入力モジュール）・3（`CanvasScaler`・`GraphicRaycaster`）・4（LayoutGroupの子に`ContentSizeFitter`を付与しない）・
 5（ScrollRectの構成）・6（生成参照はフィールドで保持し名前検索で取り直さない）・9（色・寸法・文字サイズ・文言はテーマまたは定数に集約）。
 
-対象外（`requirements.md` 2.2節）：ネイティブアプリ固有の入力（マルチウィンドウ、OSレベルのショートカット）、ネットワーク同期、UI Toolkit。
+対象外：UI Toolkit（`requirements.md` 2.2節）。加えて本ファイル独自の判断として、ネイティブアプリ固有の入力（マルチウィンドウ、OSレベルのショートカット）、ネットワーク同期も扱わない。
 
 ## 目次
 
@@ -64,13 +64,13 @@ Unity（WebGL）でuGUI画面を実行するときの、解像度・アスペク
 
 - WebGLの`Input.touchSupported`はデスクトップブラウザで`false`、モバイルブラウザで`true`になるが、モバイルブラウザでもマウスイベントとして扱われる場合がある。マウス専用・タッチ専用の分岐を作らず、`EventSystem`の標準入力モジュール（`StandaloneInputModule`、またはInput System採用時は`InputSystemUIInputModule`）が両方を吸収する構成のみを前提にする（`UiFactory`のテンプレートコメントに準拠）。
 - タップ領域44px以上（不変条件10）は、モバイルブラウザの実タップ精度（指先は44pxより広い接触面を持つ）を踏まえた下限であり、これを下回る調整をしない。
-- ピンチズーム・スワイプ等のマルチタッチジェスチャーは対象外（2.2節冒頭の対象外に含む）。ScrollRectの単一指スクロールのみを前提にする。
+- ピンチズーム・スワイプ等のマルチタッチジェスチャーは本ファイルの対象外とする（著者判断）。ScrollRectの単一指スクロールのみを前提にする。
 
 ### 2.3 キーボード
 
-- キーボード操作が要求される画面では、`Selectable.navigation`を`Explicit`にし、`selectOnUp`／`selectOnDown`／`selectOnLeft`／`selectOnRight`を明示する（F2手順6、不変条件に準ずる判断）。自動（`Automatic`）はDOM要素の配置順に依存せず矩形の位置関係から推測するため、WebGLの可変解像度では狙った順序にならないことがある。
+- キーボード操作が要求される画面では、`Selectable.navigation`を`Explicit`にし、`selectOnUp`／`selectOnDown`／`selectOnLeft`／`selectOnRight`を明示する（F2手順6、不変条件に準ずる判断）。自動（`Automatic`）は矩形の位置関係のみから推測するため、WebGLの可変解像度では狙った順序にならないことがある。
 - CJK文字を入力する`InputField`は、WebGLブラウザ側のIME（変換候補ウィンドウ）表示がブラウザ実装に依存し、候補ウィンドウの位置がCanvas上のフィールド位置と一致しない場合がある。これはC#側の実装で解決できないため、既知の制限として報告する（F6手順5）。
-- ブラウザの既定動作（Tabキーによるブラウザ内フォーカス移動、Spaceキーによるページスクロール）とゲーム内のキーボード操作が衝突することがある。回避はUnity側のWebGLテンプレート（`index.html`）の領域であり、本スキルの対象外（`requirements.md` 2.2節）。既知の制限として報告する。
+- ブラウザの既定動作（Tabキーによるブラウザ内フォーカス移動、Spaceキーによるページスクロール）とゲーム内のキーボード操作が衝突することがある。回避はUnity側のWebGLテンプレート（`index.html`）の領域であり、本ファイルの対象外とする（著者判断）。既知の制限として報告する。
 
 ### 2.4 ゲームパッド
 
