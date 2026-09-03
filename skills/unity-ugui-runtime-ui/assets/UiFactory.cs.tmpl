@@ -1,0 +1,760 @@
+// UiFactory.cs.tmpl
+//
+// uGUI要素をEditor GUI操作なし・コードのみで生成する静的ファクトリのテンプレート。
+// 生成した要素の参照はすべて呼び出し側に返す（不変条件6）。生成後に
+// GameObject.Find・transform.Find で要素を取り直すことを想定しない・行わない。
+//
+// 色・寸法・文字サイズのリテラルはこのファイル自身も持たない。すべて UiTheme
+// （またはテキスト方式解決の結果として呼び出し側が渡す Font）から受け取る（不変条件9）。
+//
+// 各Canvasは CanvasScaler（ScaleWithScreenSize）と GraphicRaycaster を必ず伴う（不変条件3）。
+// EventSystem はシーンに1つだけ存在するよう、無ければ生成する（不変条件2）。
+// ScrollRect は Viewport（RectMask2D）→ Content（LayoutGroup＋ContentSizeFitter）の構成に
+// 固定し、LayoutGroupの子には ContentSizeFitter を付与しない（不変条件4・5）。
+//
+// 本ファイルは静的関数のみで構成し、書き換え可能な公開状態（グローバル変数）を持たない。
+// UnityEditor 名前空間・OnGUI・AssetDatabase は参照しない（不変条件1）。
+//
+// 入力方式について：EnsureEventSystem は標準入力モジュール（StandaloneInputModule）を
+// 前提とする。プロジェクトが Input System パッケージのみで動作する場合は、呼び出し側で
+// StandaloneInputModule を InputSystemUIInputModule に置き換えること（本テンプレートは
+// 追加パッケージの導入を前提にしない）。
+//
+// テキスト方式について：CreateText 系関数はすべて Font を引数として要求する。フォント解決
+// （TMPro を使うか、CJK対応フォントが存在するか等）はこのファイルの責務ではない
+// （5.2節・不変条件7、必要なら text-and-fonts.md を参照）。
+
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.Events;
+using UnityEngine.EventSystems;
+using UnityEngine.UI;
+
+namespace App.Ui
+{
+    /// <summary>
+    /// uGUI要素の生成関数を提供する静的ファクトリ。
+    /// すべての関数は生成した要素の参照を返す。名前検索による再取得は行わない（不変条件6）。
+    /// </summary>
+    public static class UiFactory
+    {
+        // ------------------------------------------------------------------
+        // 共通ヘルパー
+        // ------------------------------------------------------------------
+
+        /// <summary>親の矩形いっぱいに広げるアンカー設定を行う。</summary>
+        private static void StretchFull(RectTransform rect)
+        {
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.one;
+            rect.offsetMin = Vector2.zero;
+            rect.offsetMax = Vector2.zero;
+            rect.pivot = new Vector2(0.5f, 0.5f);
+        }
+
+        // ------------------------------------------------------------------
+        // Canvas一式
+        // ------------------------------------------------------------------
+
+        public readonly struct CanvasRefs
+        {
+            public readonly GameObject GameObject;
+            public readonly RectTransform RectTransform;
+            public readonly Canvas Canvas;
+            public readonly CanvasScaler Scaler;
+            public readonly GraphicRaycaster Raycaster;
+
+            public CanvasRefs(GameObject go, Canvas canvas, CanvasScaler scaler, GraphicRaycaster raycaster)
+            {
+                GameObject = go;
+                RectTransform = (RectTransform)go.transform;
+                Canvas = canvas;
+                Scaler = scaler;
+                Raycaster = raycaster;
+            }
+        }
+
+        /// <summary>
+        /// Canvas＋CanvasScaler（ScaleWithScreenSize）＋GraphicRaycasterを1組生成する（不変条件3）。
+        /// 参照解像度・マッチ方式はUX設計メモ（5.3節7手順）で決めた値を呼び出し側から渡す。
+        /// </summary>
+        public static CanvasRefs CreateCanvas(string name, Vector2 referenceResolution, float matchWidthOrHeight, int sortingOrder)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+
+            var canvas = go.GetComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = sortingOrder;
+
+            var scaler = go.GetComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = referenceResolution;
+            scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
+            scaler.matchWidthOrHeight = matchWidthOrHeight;
+
+            var raycaster = go.GetComponent<GraphicRaycaster>();
+
+            return new CanvasRefs(go, canvas, scaler, raycaster);
+        }
+
+        // ------------------------------------------------------------------
+        // EventSystem
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// シーンに存在するEventSystemを返す。無ければ生成する（不変条件2）。
+        /// 名前検索ではなく型検索を用いるため、不変条件6（GameObject.Find等の禁止）に抵触しない。
+        /// </summary>
+        public static EventSystem EnsureEventSystem()
+        {
+            var existing = Object.FindFirstObjectByType<EventSystem>();
+            if (existing != null)
+            {
+                return existing;
+            }
+
+            var go = new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
+            return go.GetComponent<EventSystem>();
+        }
+
+        // ------------------------------------------------------------------
+        // Panel
+        // ------------------------------------------------------------------
+
+        public readonly struct PanelRefs
+        {
+            public readonly GameObject GameObject;
+            public readonly RectTransform RectTransform;
+            public readonly Image Background;
+
+            public PanelRefs(GameObject go, Image background)
+            {
+                GameObject = go;
+                RectTransform = (RectTransform)go.transform;
+                Background = background;
+            }
+        }
+
+        /// <summary>
+        /// 親いっぱいに広がるパネルを生成する。角丸が必要な場合は
+        /// CreateNineSliceSprite の戻り値を backgroundSprite に渡す。
+        /// </summary>
+        public static PanelRefs CreatePanel(RectTransform parent, string name, Color32 backgroundColor, Sprite backgroundSprite)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(Image));
+            var rect = (RectTransform)go.transform;
+            rect.SetParent(parent, false);
+            StretchFull(rect);
+
+            var background = go.GetComponent<Image>();
+            background.color = backgroundColor;
+            if (backgroundSprite != null)
+            {
+                background.sprite = backgroundSprite;
+                background.type = Image.Type.Sliced;
+            }
+
+            return new PanelRefs(go, background);
+        }
+
+        // ------------------------------------------------------------------
+        // Text
+        // ------------------------------------------------------------------
+
+        public readonly struct TextRefs
+        {
+            public readonly GameObject GameObject;
+            public readonly RectTransform RectTransform;
+            public readonly Text Text;
+
+            public TextRefs(GameObject go, Text text)
+            {
+                GameObject = go;
+                RectTransform = (RectTransform)go.transform;
+                Text = text;
+            }
+        }
+
+        /// <summary>
+        /// UnityEngine.UI.Text を1件生成する。フォントは呼び出し側が解決して渡す（不変条件7）。
+        /// 既定では親いっぱいに広がる矩形を持つ。位置調整は戻り値のRectTransformに対して行う。
+        /// </summary>
+        public static TextRefs CreateText(RectTransform parent, string name, string content, Font font, int fontSize, Color32 color, TextAnchor alignment)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(Text));
+            var rect = (RectTransform)go.transform;
+            rect.SetParent(parent, false);
+            StretchFull(rect);
+
+            var text = go.GetComponent<Text>();
+            text.font = font;
+            text.text = content;
+            text.fontSize = fontSize;
+            text.color = color;
+            text.alignment = alignment;
+            text.horizontalOverflow = HorizontalWrapMode.Wrap;
+            text.verticalOverflow = VerticalWrapMode.Truncate;
+            text.raycastTarget = false;
+
+            return new TextRefs(go, text);
+        }
+
+        // ------------------------------------------------------------------
+        // Button
+        // ------------------------------------------------------------------
+
+        public readonly struct ButtonRefs
+        {
+            public readonly GameObject GameObject;
+            public readonly RectTransform RectTransform;
+            public readonly Button Button;
+            public readonly Image Background;
+            public readonly TextRefs Label;
+
+            public ButtonRefs(GameObject go, Button button, Image background, TextRefs label)
+            {
+                GameObject = go;
+                RectTransform = (RectTransform)go.transform;
+                Button = button;
+                Background = background;
+                Label = label;
+            }
+        }
+
+        /// <summary>
+        /// タップ領域が UiTheme.Sizes.TapMinSize 以上のボタンを生成する（不変条件10）。
+        /// onClick は呼び出し側の Build 手順で1回だけ渡すこと（Render で再登録しない、5.5節手順5）。
+        /// </summary>
+        public static ButtonRefs CreateButton(RectTransform parent, string name, string label, Font font, Sprite backgroundSprite, UnityAction onClick)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button));
+            var rect = (RectTransform)go.transform;
+            rect.SetParent(parent, false);
+
+            var layoutElement = go.AddComponent<LayoutElement>();
+            layoutElement.minWidth = UiTheme.Sizes.TapMinSize;
+            layoutElement.minHeight = UiTheme.Sizes.TapMinSize;
+
+            var background = go.GetComponent<Image>();
+            background.color = UiTheme.Colors.Accent;
+            if (backgroundSprite != null)
+            {
+                background.sprite = backgroundSprite;
+                background.type = Image.Type.Sliced;
+            }
+
+            var button = go.GetComponent<Button>();
+            button.targetGraphic = background;
+            button.onClick.AddListener(onClick);
+
+            var labelRefs = CreateText(rect, name + "Label", label, font, UiTheme.TextSizes.Body, UiTheme.Colors.OnAccent, TextAnchor.MiddleCenter);
+
+            return new ButtonRefs(go, button, background, labelRefs);
+        }
+
+        // ------------------------------------------------------------------
+        // Toggle
+        // ------------------------------------------------------------------
+
+        public readonly struct ToggleRefs
+        {
+            public readonly GameObject GameObject;
+            public readonly RectTransform RectTransform;
+            public readonly Toggle Toggle;
+            public readonly Image Background;
+            public readonly Image Checkmark;
+            public readonly TextRefs Label;
+
+            public ToggleRefs(GameObject go, Toggle toggle, Image background, Image checkmark, TextRefs label)
+            {
+                GameObject = go;
+                RectTransform = (RectTransform)go.transform;
+                Toggle = toggle;
+                Background = background;
+                Checkmark = checkmark;
+                Label = label;
+            }
+        }
+
+        /// <summary>チェックボックス型トグルを生成する。タップ領域は正方形でTapMinSizeを確保する。</summary>
+        public static ToggleRefs CreateToggle(RectTransform parent, string name, string label, Font font, bool isOnDefault, UnityAction<bool> onValueChanged)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(Toggle));
+            var rect = (RectTransform)go.transform;
+            rect.SetParent(parent, false);
+
+            var layoutElement = go.AddComponent<LayoutElement>();
+            layoutElement.minHeight = UiTheme.Sizes.TapMinSize;
+
+            var backgroundGo = new GameObject(name + "Background", typeof(RectTransform), typeof(Image));
+            var backgroundRect = (RectTransform)backgroundGo.transform;
+            backgroundRect.SetParent(rect, false);
+            backgroundRect.anchorMin = new Vector2(0f, 0.5f);
+            backgroundRect.anchorMax = new Vector2(0f, 0.5f);
+            backgroundRect.pivot = new Vector2(0f, 0.5f);
+            backgroundRect.sizeDelta = new Vector2(UiTheme.Sizes.TapMinSize, UiTheme.Sizes.TapMinSize);
+            backgroundRect.anchoredPosition = Vector2.zero;
+            var background = backgroundGo.GetComponent<Image>();
+            background.color = UiTheme.Colors.BackgroundSecondary;
+
+            var checkmarkGo = new GameObject(name + "Checkmark", typeof(RectTransform), typeof(Image));
+            var checkmarkRect = (RectTransform)checkmarkGo.transform;
+            checkmarkRect.SetParent(backgroundRect, false);
+            StretchFull(checkmarkRect);
+            var checkmark = checkmarkGo.GetComponent<Image>();
+            checkmark.color = UiTheme.Colors.Accent;
+
+            var toggle = go.GetComponent<Toggle>();
+            toggle.targetGraphic = background;
+            toggle.graphic = checkmark;
+            toggle.isOn = isOnDefault;
+            toggle.onValueChanged.AddListener(onValueChanged);
+
+            var labelRefs = CreateText(rect, name + "Label", label, font, UiTheme.TextSizes.Body, UiTheme.Colors.ForegroundPrimary, TextAnchor.MiddleLeft);
+            labelRefs.RectTransform.anchorMin = Vector2.zero;
+            labelRefs.RectTransform.anchorMax = Vector2.one;
+            labelRefs.RectTransform.offsetMin = new Vector2(UiTheme.Sizes.TapMinSize + UiTheme.Sizes.SpacingSmall, 0f);
+            labelRefs.RectTransform.offsetMax = Vector2.zero;
+
+            return new ToggleRefs(go, toggle, background, checkmark, labelRefs);
+        }
+
+        // ------------------------------------------------------------------
+        // Slider
+        // ------------------------------------------------------------------
+
+        public readonly struct SliderRefs
+        {
+            public readonly GameObject GameObject;
+            public readonly RectTransform RectTransform;
+            public readonly Slider Slider;
+            public readonly Image Background;
+            public readonly Image Fill;
+            public readonly RectTransform Handle;
+
+            public SliderRefs(GameObject go, Slider slider, Image background, Image fill, RectTransform handle)
+            {
+                GameObject = go;
+                RectTransform = (RectTransform)go.transform;
+                Slider = slider;
+                Background = background;
+                Fill = fill;
+                Handle = handle;
+            }
+        }
+
+        /// <summary>水平スライダーを生成する。Background・FillArea/Fill・HandleArea/Handleの構成を持つ。</summary>
+        public static SliderRefs CreateSlider(RectTransform parent, string name, float minValue, float maxValue, float valueDefault, UnityAction<float> onValueChanged)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(Slider));
+            var rect = (RectTransform)go.transform;
+            rect.SetParent(parent, false);
+
+            var layoutElement = go.AddComponent<LayoutElement>();
+            layoutElement.minHeight = UiTheme.Sizes.TapMinSize;
+
+            var backgroundGo = new GameObject(name + "Background", typeof(RectTransform), typeof(Image));
+            var backgroundRect = (RectTransform)backgroundGo.transform;
+            backgroundRect.SetParent(rect, false);
+            StretchFull(backgroundRect);
+            var background = backgroundGo.GetComponent<Image>();
+            background.color = UiTheme.Colors.BackgroundSecondary;
+
+            var fillAreaGo = new GameObject(name + "FillArea", typeof(RectTransform));
+            var fillAreaRect = (RectTransform)fillAreaGo.transform;
+            fillAreaRect.SetParent(rect, false);
+            StretchFull(fillAreaRect);
+
+            var fillGo = new GameObject(name + "Fill", typeof(RectTransform), typeof(Image));
+            var fillRect = (RectTransform)fillGo.transform;
+            fillRect.SetParent(fillAreaRect, false);
+            fillRect.anchorMin = Vector2.zero;
+            fillRect.anchorMax = new Vector2(0f, 1f);
+            fillRect.sizeDelta = Vector2.zero;
+            fillRect.pivot = new Vector2(0f, 0.5f);
+            var fill = fillGo.GetComponent<Image>();
+            fill.color = UiTheme.Colors.Accent;
+
+            var handleAreaGo = new GameObject(name + "HandleArea", typeof(RectTransform));
+            var handleAreaRect = (RectTransform)handleAreaGo.transform;
+            handleAreaRect.SetParent(rect, false);
+            StretchFull(handleAreaRect);
+
+            var handleGo = new GameObject(name + "Handle", typeof(RectTransform), typeof(Image));
+            var handleRect = (RectTransform)handleGo.transform;
+            handleRect.SetParent(handleAreaRect, false);
+            handleRect.sizeDelta = new Vector2(UiTheme.Sizes.SpacingLarge, UiTheme.Sizes.TapMinSize);
+            handleRect.anchorMin = new Vector2(0f, 0.5f);
+            handleRect.anchorMax = new Vector2(0f, 0.5f);
+            handleRect.pivot = new Vector2(0.5f, 0.5f);
+            var handleImage = handleGo.GetComponent<Image>();
+            handleImage.color = UiTheme.Colors.ForegroundPrimary;
+
+            var slider = go.GetComponent<Slider>();
+            slider.direction = Slider.Direction.LeftToRight;
+            slider.fillRect = fillRect;
+            slider.handleRect = handleRect;
+            slider.targetGraphic = handleImage;
+            slider.minValue = minValue;
+            slider.maxValue = maxValue;
+            slider.value = valueDefault;
+            slider.onValueChanged.AddListener(onValueChanged);
+
+            return new SliderRefs(go, slider, background, fill, handleRect);
+        }
+
+        // ------------------------------------------------------------------
+        // ScrollRect（不変条件5：Viewport(RectMask2D) → Content(LayoutGroup+ContentSizeFitter)）
+        // ------------------------------------------------------------------
+
+        public readonly struct ScrollRectRefs
+        {
+            public readonly GameObject GameObject;
+            public readonly RectTransform RectTransform;
+            public readonly ScrollRect ScrollRect;
+            public readonly RectTransform Viewport;
+            public readonly RectTransform Content;
+            public readonly VerticalLayoutGroup ContentLayoutGroup;
+            public readonly ContentSizeFitter ContentSizeFitter;
+
+            public ScrollRectRefs(GameObject go, ScrollRect scrollRect, RectTransform viewport, RectTransform content, VerticalLayoutGroup contentLayoutGroup, ContentSizeFitter contentSizeFitter)
+            {
+                GameObject = go;
+                RectTransform = (RectTransform)go.transform;
+                ScrollRect = scrollRect;
+                Viewport = viewport;
+                Content = content;
+                ContentLayoutGroup = contentLayoutGroup;
+                ContentSizeFitter = contentSizeFitter;
+            }
+        }
+
+        /// <summary>
+        /// 縦スクロールのScrollRectを生成する。Viewportは RectMask2D のみを持ち
+        /// ContentSizeFitter は付与しない。Content は VerticalLayoutGroup と
+        /// ContentSizeFitter を自身に持つ（子には付与しない、不変条件4・5）。
+        /// 行の生成は呼び出し側が Content 配下に行う（50件超はプール設計を検討、5.4節手順4）。
+        /// </summary>
+        public static ScrollRectRefs CreateScrollRect(RectTransform parent, string name)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(ScrollRect));
+            var rect = (RectTransform)go.transform;
+            rect.SetParent(parent, false);
+            StretchFull(rect);
+
+            // Viewport：RectMask2Dのみ。LayoutGroupを持たないためContentSizeFitterは付与しない。
+            var viewportGo = new GameObject(name + "Viewport", typeof(RectTransform), typeof(RectMask2D), typeof(Image));
+            var viewportRect = (RectTransform)viewportGo.transform;
+            viewportRect.SetParent(rect, false);
+            StretchFull(viewportRect);
+            var viewportImage = viewportGo.GetComponent<Image>();
+            viewportImage.color = Color.clear; // マスク描画のためのみに存在し、可視背景は持たない。
+
+            // Content：VerticalLayoutGroup＋ContentSizeFitterを自身に持つ。子への付与は行わない。
+            var contentGo = new GameObject(name + "Content", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
+            var contentRect = (RectTransform)contentGo.transform;
+            contentRect.SetParent(viewportRect, false);
+            contentRect.anchorMin = new Vector2(0f, 1f);
+            contentRect.anchorMax = new Vector2(1f, 1f);
+            contentRect.pivot = new Vector2(0.5f, 1f);
+            contentRect.sizeDelta = Vector2.zero;
+
+            var contentLayoutGroup = contentGo.GetComponent<VerticalLayoutGroup>();
+            contentLayoutGroup.childAlignment = TextAnchor.UpperCenter;
+            contentLayoutGroup.childForceExpandWidth = true;
+            contentLayoutGroup.childForceExpandHeight = false;
+            contentLayoutGroup.childControlWidth = true;
+            contentLayoutGroup.childControlHeight = false;
+            contentLayoutGroup.spacing = UiTheme.Sizes.SpacingSmall;
+            var padding = (int)UiTheme.Sizes.SpacingSmall;
+            contentLayoutGroup.padding = new RectOffset(padding, padding, padding, padding);
+
+            var contentSizeFitter = contentGo.GetComponent<ContentSizeFitter>();
+            contentSizeFitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+            contentSizeFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+            var scrollRect = go.GetComponent<ScrollRect>();
+            scrollRect.viewport = viewportRect;
+            scrollRect.content = contentRect;
+            scrollRect.horizontal = false;
+            scrollRect.vertical = true;
+            scrollRect.movementType = ScrollRect.MovementType.Clamped;
+
+            return new ScrollRectRefs(go, scrollRect, viewportRect, contentRect, contentLayoutGroup, contentSizeFitter);
+        }
+
+        // ------------------------------------------------------------------
+        // InputField
+        // ------------------------------------------------------------------
+
+        public readonly struct InputFieldRefs
+        {
+            public readonly GameObject GameObject;
+            public readonly RectTransform RectTransform;
+            public readonly InputField InputField;
+            public readonly Image Background;
+            public readonly TextRefs Placeholder;
+            public readonly TextRefs Text;
+
+            public InputFieldRefs(GameObject go, InputField inputField, Image background, TextRefs placeholder, TextRefs text)
+            {
+                GameObject = go;
+                RectTransform = (RectTransform)go.transform;
+                InputField = inputField;
+                Background = background;
+                Placeholder = placeholder;
+                Text = text;
+            }
+        }
+
+        /// <summary>1行のテキスト入力欄を生成する。プレースホルダーと入力テキストの2枚のTextを持つ。</summary>
+        public static InputFieldRefs CreateInputField(RectTransform parent, string name, string placeholder, Font font, UnityAction<string> onValueChanged)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(InputField));
+            var rect = (RectTransform)go.transform;
+            rect.SetParent(parent, false);
+
+            var layoutElement = go.AddComponent<LayoutElement>();
+            layoutElement.minHeight = UiTheme.Sizes.TapMinSize;
+
+            var background = go.GetComponent<Image>();
+            background.color = UiTheme.Colors.BackgroundSecondary;
+
+            var textAreaGo = new GameObject(name + "TextArea", typeof(RectTransform), typeof(RectMask2D));
+            var textAreaRect = (RectTransform)textAreaGo.transform;
+            textAreaRect.SetParent(rect, false);
+            textAreaRect.anchorMin = Vector2.zero;
+            textAreaRect.anchorMax = Vector2.one;
+            textAreaRect.offsetMin = new Vector2(UiTheme.Sizes.SpacingSmall, 0f);
+            textAreaRect.offsetMax = new Vector2(-UiTheme.Sizes.SpacingSmall, 0f);
+
+            var placeholderRefs = CreateText(textAreaRect, name + "Placeholder", placeholder, font, UiTheme.TextSizes.Body, UiTheme.Colors.ForegroundSecondary, TextAnchor.MiddleLeft);
+            placeholderRefs.Text.fontStyle = FontStyle.Italic;
+
+            var textRefs = CreateText(textAreaRect, name + "Text", string.Empty, font, UiTheme.TextSizes.Body, UiTheme.Colors.ForegroundPrimary, TextAnchor.MiddleLeft);
+
+            var inputField = go.GetComponent<InputField>();
+            inputField.targetGraphic = background;
+            inputField.textComponent = textRefs.Text;
+            inputField.placeholder = placeholderRefs.Text;
+            inputField.onValueChanged.AddListener(onValueChanged);
+
+            return new InputFieldRefs(go, inputField, background, placeholderRefs, textRefs);
+        }
+
+        // ------------------------------------------------------------------
+        // Dropdown
+        // ------------------------------------------------------------------
+
+        public readonly struct DropdownRefs
+        {
+            public readonly GameObject GameObject;
+            public readonly RectTransform RectTransform;
+            public readonly Dropdown Dropdown;
+            public readonly Image Background;
+            public readonly TextRefs Label;
+            public readonly RectTransform Template;
+            public readonly ScrollRectRefs TemplateScrollRect;
+            public readonly Toggle ItemToggle;
+            public readonly TextRefs ItemLabel;
+
+            public DropdownRefs(GameObject go, Dropdown dropdown, Image background, TextRefs label, RectTransform template, ScrollRectRefs templateScrollRect, Toggle itemToggle, TextRefs itemLabel)
+            {
+                GameObject = go;
+                RectTransform = (RectTransform)go.transform;
+                Dropdown = dropdown;
+                Background = background;
+                Label = label;
+                Template = template;
+                TemplateScrollRect = templateScrollRect;
+                ItemToggle = itemToggle;
+                ItemLabel = itemLabel;
+            }
+        }
+
+        /// <summary>
+        /// ドロップダウンを生成する。展開時のテンプレートは ScrollRect と同じ
+        /// Viewport(RectMask2D) → Content(VerticalLayoutGroup+ContentSizeFitter) 構成を持つ
+        /// （不変条件4・5）。テンプレートは既定で非表示にする（Dropdownが開閉を制御する）。
+        /// </summary>
+        public static DropdownRefs CreateDropdown(RectTransform parent, string name, Font font, IReadOnlyList<string> options, UnityAction<int> onValueChanged)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Dropdown));
+            var rect = (RectTransform)go.transform;
+            rect.SetParent(parent, false);
+
+            var layoutElement = go.AddComponent<LayoutElement>();
+            layoutElement.minHeight = UiTheme.Sizes.TapMinSize;
+
+            var background = go.GetComponent<Image>();
+            background.color = UiTheme.Colors.BackgroundSecondary;
+
+            var initialCaption = options.Count > 0 ? options[0] : string.Empty;
+            var labelRefs = CreateText(rect, name + "Label", initialCaption, font, UiTheme.TextSizes.Body, UiTheme.Colors.ForegroundPrimary, TextAnchor.MiddleLeft);
+            labelRefs.RectTransform.offsetMin = new Vector2(UiTheme.Sizes.SpacingSmall, 0f);
+            labelRefs.RectTransform.offsetMax = new Vector2(-UiTheme.Sizes.SpacingSmall, 0f);
+
+            // 展開時テンプレート（本体の下に重ねて配置し、既定で非表示）。
+            var templateGo = new GameObject(name + "Template", typeof(RectTransform), typeof(Image), typeof(ScrollRect));
+            var templateRect = (RectTransform)templateGo.transform;
+            templateRect.SetParent(rect, false);
+            templateRect.anchorMin = new Vector2(0f, 0f);
+            templateRect.anchorMax = new Vector2(1f, 0f);
+            templateRect.pivot = new Vector2(0.5f, 1f);
+            templateRect.sizeDelta = new Vector2(0f, UiTheme.Sizes.TapMinSize * 3f);
+            var templateBackground = templateGo.GetComponent<Image>();
+            templateBackground.color = UiTheme.Colors.BackgroundSecondary;
+
+            var viewportGo = new GameObject(name + "TemplateViewport", typeof(RectTransform), typeof(RectMask2D), typeof(Image));
+            var viewportRect = (RectTransform)viewportGo.transform;
+            viewportRect.SetParent(templateRect, false);
+            StretchFull(viewportRect);
+            viewportGo.GetComponent<Image>().color = Color.clear;
+
+            var contentGo = new GameObject(name + "TemplateContent", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
+            var contentRect = (RectTransform)contentGo.transform;
+            contentRect.SetParent(viewportRect, false);
+            contentRect.anchorMin = new Vector2(0f, 1f);
+            contentRect.anchorMax = new Vector2(1f, 1f);
+            contentRect.pivot = new Vector2(0.5f, 1f);
+            contentRect.sizeDelta = Vector2.zero;
+
+            var contentLayoutGroup = contentGo.GetComponent<VerticalLayoutGroup>();
+            contentLayoutGroup.childForceExpandWidth = true;
+            contentLayoutGroup.childForceExpandHeight = false;
+            contentLayoutGroup.childControlWidth = true;
+            contentLayoutGroup.childControlHeight = false;
+
+            var contentSizeFitter = contentGo.GetComponent<ContentSizeFitter>();
+            contentSizeFitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+            contentSizeFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+            var templateScrollRect = templateGo.GetComponent<ScrollRect>();
+            templateScrollRect.viewport = viewportRect;
+            templateScrollRect.content = contentRect;
+            templateScrollRect.horizontal = false;
+            templateScrollRect.vertical = true;
+            templateScrollRect.movementType = ScrollRect.MovementType.Clamped;
+
+            var templateScrollRectRefs = new ScrollRectRefs(templateGo, templateScrollRect, viewportRect, contentRect, contentLayoutGroup, contentSizeFitter);
+
+            // 選択肢1件分のテンプレート（Dropdownが複製して使用する）。
+            var itemGo = new GameObject(name + "Item", typeof(RectTransform), typeof(Toggle));
+            var itemRect = (RectTransform)itemGo.transform;
+            itemRect.SetParent(contentRect, false);
+            var itemLayoutElement = itemGo.AddComponent<LayoutElement>();
+            itemLayoutElement.minHeight = UiTheme.Sizes.TapMinSize;
+
+            var itemBackgroundGo = new GameObject(name + "ItemBackground", typeof(RectTransform), typeof(Image));
+            var itemBackgroundRect = (RectTransform)itemBackgroundGo.transform;
+            itemBackgroundRect.SetParent(itemRect, false);
+            StretchFull(itemBackgroundRect);
+            var itemBackground = itemBackgroundGo.GetComponent<Image>();
+            itemBackground.color = UiTheme.Colors.BackgroundSecondary;
+
+            var itemCheckmarkGo = new GameObject(name + "ItemCheckmark", typeof(RectTransform), typeof(Image));
+            var itemCheckmarkRect = (RectTransform)itemCheckmarkGo.transform;
+            itemCheckmarkRect.SetParent(itemRect, false);
+            itemCheckmarkRect.anchorMin = new Vector2(0f, 0.5f);
+            itemCheckmarkRect.anchorMax = new Vector2(0f, 0.5f);
+            itemCheckmarkRect.pivot = new Vector2(0f, 0.5f);
+            itemCheckmarkRect.sizeDelta = new Vector2(UiTheme.Sizes.SpacingLarge, UiTheme.Sizes.SpacingLarge);
+            itemCheckmarkRect.anchoredPosition = new Vector2(UiTheme.Sizes.SpacingSmall, 0f);
+            var itemCheckmark = itemCheckmarkGo.GetComponent<Image>();
+            itemCheckmark.color = UiTheme.Colors.Accent;
+
+            var itemLabelRefs = CreateText(itemRect, name + "ItemLabel", string.Empty, font, UiTheme.TextSizes.Body, UiTheme.Colors.ForegroundPrimary, TextAnchor.MiddleLeft);
+            itemLabelRefs.RectTransform.offsetMin = new Vector2(UiTheme.Sizes.SpacingLarge + UiTheme.Sizes.SpacingSmall, 0f);
+            itemLabelRefs.RectTransform.offsetMax = Vector2.zero;
+
+            var itemToggle = itemGo.GetComponent<Toggle>();
+            itemToggle.targetGraphic = itemBackground;
+            itemToggle.graphic = itemCheckmark;
+
+            var dropdown = go.GetComponent<Dropdown>();
+            dropdown.targetGraphic = background;
+            dropdown.captionText = labelRefs.Text;
+            dropdown.template = templateRect;
+            dropdown.itemText = itemLabelRefs.Text;
+
+            dropdown.options.Clear();
+            for (var i = 0; i < options.Count; i++)
+            {
+                dropdown.options.Add(new Dropdown.OptionData(options[i]));
+            }
+
+            dropdown.onValueChanged.AddListener(onValueChanged);
+
+            // Dropdownが自ら開閉を制御するため、テンプレートは既定で非表示にしておく。
+            templateGo.SetActive(false);
+
+            return new DropdownRefs(go, dropdown, background, labelRefs, templateRect, templateScrollRectRefs, itemToggle, itemLabelRefs);
+        }
+
+        // ------------------------------------------------------------------
+        // 9分割スプライト（実行時生成の手続き的テクスチャ）
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// 角丸矩形を実行時に手続き的に生成し、9分割（Sliced）表示用のSpriteとして返す。
+        /// Editor専用の組み込みスプライトは参照しない（5.4節手順6）。
+        /// border は cornerRadius から自動算出するため、角が潰れない最小限のテクスチャに留める。
+        /// </summary>
+        public static Sprite CreateNineSliceSprite(string name, float cornerRadius, Color32 fillColor)
+        {
+            var half = Mathf.Max(1, Mathf.CeilToInt(cornerRadius));
+            var size = half * 2 + 1;
+
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, false)
+            {
+                name = name,
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp,
+            };
+
+            var pixels = new Color32[size * size];
+            for (var y = 0; y < size; y++)
+            {
+                for (var x = 0; x < size; x++)
+                {
+                    var inside = IsInsideRoundedRect(x, y, size, size, cornerRadius);
+                    pixels[(y * size) + x] = inside
+                        ? fillColor
+                        : new Color32(fillColor.r, fillColor.g, fillColor.b, 0);
+                }
+            }
+
+            texture.SetPixels32(pixels);
+            texture.Apply(false, false);
+
+            var rect = new Rect(0f, 0f, size, size);
+            var pivot = new Vector2(0.5f, 0.5f);
+            var border = new Vector4(half, half, half, half);
+            var sprite = Sprite.Create(texture, rect, pivot, 100f, 0, SpriteMeshType.FullRect, border);
+            sprite.name = name;
+
+            return sprite;
+        }
+
+        /// <summary>ピクセル座標(x, y)が角丸半径cornerRadiusの矩形内にあるかを判定する。</summary>
+        private static bool IsInsideRoundedRect(int x, int y, int width, int height, float cornerRadius)
+        {
+            var px = x + 0.5f;
+            var py = y + 0.5f;
+
+            var isInCornerZone = (px < cornerRadius || px > width - cornerRadius)
+                && (py < cornerRadius || py > height - cornerRadius);
+
+            if (!isInCornerZone)
+            {
+                return true;
+            }
+
+            var nearestCornerX = Mathf.Clamp(px, cornerRadius, width - cornerRadius);
+            var nearestCornerY = Mathf.Clamp(py, cornerRadius, height - cornerRadius);
+            var distance = Vector2.Distance(new Vector2(px, py), new Vector2(nearestCornerX, nearestCornerY));
+
+            return distance <= cornerRadius;
+        }
+    }
+}
