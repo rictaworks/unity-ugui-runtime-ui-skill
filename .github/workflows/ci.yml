@@ -1,0 +1,103 @@
+name: CI
+
+# requirements.md 11.3節が定めるCI検査6項目を実行する。
+# 追加のGitHub Actions外部アクションには依存せず、actions/checkout・
+# actions/setup-pythonのみを用いる。検証ロジック自体は `.github/scripts/` の
+# Pythonスクリプト（標準ライブラリのみ）として実装する。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # 1. skills-ref validate 相当：フロントマターと命名の検証
+  frontmatter-validate:
+    name: フロントマター・命名検証
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: SKILL.md フロントマター・命名を検証
+        run: python3 .github/scripts/validate_frontmatter.py
+
+  # 2. SKILL.md の行数上限と、参照ファイルの目次有無
+  length-and-toc-check:
+    name: 行数上限・目次チェック
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: SKILL.md 行数と参照ファイル目次を検証
+        run: python3 .github/scripts/check_skill_md_length.py
+
+  # 3. 参照ファイルへの相対リンクの存在確認（1階層まで）
+  relative-link-check:
+    name: 相対リンク存在確認
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: 相対リンクの参照先を検証
+        run: python3 .github/scripts/check_relative_links.py
+
+  # 4. 禁止内容の検査：資格情報・メールアドレス・個人名・ホスト固有フロントマターフィールド
+  forbidden-content-check:
+    name: 禁止内容検査
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: 資格情報・メールアドレス・個人名・ホスト固有フィールドを検査
+        run: python3 .github/scripts/check_forbidden_content.py
+
+  # 5. scripts/ の単体テスト（禁止パターンの検出・コントラスト計算・ログ解析）
+  scripts-unittest:
+    name: scripts/ 単体テスト
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: 単体テストを実行（追加パッケージなし）
+        run: python3 -m unittest discover -s tests/scripts -v
+
+  # 6. .skill パッケージの生成
+  build-skill-package:
+    name: .skill パッケージ生成
+    runs-on: ubuntu-latest
+    needs:
+      - frontmatter-validate
+      - length-and-toc-check
+      - relative-link-check
+      - forbidden-content-check
+      - scripts-unittest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: skills/unity-ugui-runtime-ui/ を .skill パッケージ化
+        run: python3 .github/scripts/build_skill_package.py dist
+      - name: パッケージをアーティファクトとして保存
+        uses: actions/upload-artifact@v4
+        with:
+          name: skill-package
+          path: dist/*.skill
+          if-no-files-found: error
