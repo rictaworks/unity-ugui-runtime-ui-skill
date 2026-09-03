@@ -48,6 +48,17 @@
 // 検出できた不備は必ずAssert.Failで報告し、検出ロジック自体の前提（Overlay Canvas・
 // UiScreenBase継承）が崩れている場合は例外を伝播させる。
 //
+// 前提が崩れた場合のサイレントパス対策：上記のtransform配下前提（RootGameObjectが
+// 画面コンポーネント自身のtransform配下に無い等）が成立しない場合、各検出メソッドの
+// 走査対象（RectTransform・Text・Selectable）が0件になり、Assert.IsEmptyが常に成功して
+// 検出が機能しなくなる。これを防ぐため、各検出メソッドは走査対象が1件以上見つかったことを
+// 明示的に確認し、0件であれば前提の破れとしてAssert.Failで失敗させる（フォールバック禁止・
+// Fail Fast原則）。同様に、Screen.SetResolutionが実行環境（Editor Play Mode・
+// -nographicsバッチモード等）で反映されないことがあるため、BuildScreenAtResolutionは
+// 反映結果をScreen.width/heightで確認し、反映されなければAssert.Failで失敗させる。
+// 反映されないまま検証を続けると、4アスペクト比のテストケースが実質同一解像度で重複実行
+// されるだけになり、検出漏れをサイレントに許すことになる。
+//
 // UnityEditor名前空間・OnGUI・AssetDatabaseは参照しない（不変条件1）。
 
 using System;
@@ -125,8 +136,11 @@ namespace App.Ui.Tests
         {
             yield return BuildScreenAtResolution(width, height);
 
+            var checkableRects = new List<RectTransform>(EnumerateCheckableRectTransforms(_screenGameObject.transform));
+            Assert.IsTrue(checkableRects.Count > 0, BuildNoTargetsFoundMessage("RectTransform（Graphic付き）"));
+
             var offenders = new List<string>();
-            foreach (var rect in EnumerateCheckableRectTransforms(_screenGameObject.transform))
+            foreach (var rect in checkableRects)
             {
                 var screenRect = GetScreenSpaceRect(rect);
                 if (screenRect.xMin < 0f || screenRect.yMin < 0f
@@ -152,8 +166,11 @@ namespace App.Ui.Tests
         {
             yield return BuildScreenAtResolution(width, height);
 
+            var texts = _screenGameObject.GetComponentsInChildren<Text>(includeInactive: false);
+            Assert.IsTrue(texts.Length > 0, BuildNoTargetsFoundMessage("Text"));
+
             var offenders = new List<string>();
-            foreach (var text in _screenGameObject.GetComponentsInChildren<Text>(includeInactive: false))
+            foreach (var text in texts)
             {
                 // Wrap設定時のpreferredWidthは矩形幅を超えるのが仕様どおりの挙動のため対象外
                 // （本ファイル冒頭コメント参照）。
@@ -187,8 +204,11 @@ namespace App.Ui.Tests
         {
             yield return BuildScreenAtResolution(width, height);
 
+            var selectables = _screenGameObject.GetComponentsInChildren<Selectable>(includeInactive: false);
+            Assert.IsTrue(selectables.Length > 0, BuildNoTargetsFoundMessage("Selectable"));
+
             var offenders = new List<string>();
-            foreach (var selectable in _screenGameObject.GetComponentsInChildren<Selectable>(includeInactive: false))
+            foreach (var selectable in selectables)
             {
                 if (!selectable.interactable)
                 {
@@ -223,6 +243,16 @@ namespace App.Ui.Tests
             // 環境があるため2フレーム待機する。
             yield return null;
             yield return null;
+
+            if (Screen.width != width || Screen.height != height)
+            {
+                Assert.Fail(
+                    $"Screen.SetResolution({width}, {height}) が反映されなかった" +
+                    $"（実際: {Screen.width}x{Screen.height}）。Editor Play Mode・-nographics" +
+                    "バッチモード等、実行環境によっては解像度変更が反映されないことがある。" +
+                    "本テストは反映後の実解像度でアスペクト比を検証するため、反映されない環境" +
+                    "では既定値へ倒さずここで失敗させる（フォールバック禁止）。");
+            }
 
             var screenType = ScreenUnderTestType;
             if (screenType == null || !typeof(UiScreenBase).IsAssignableFrom(screenType))
@@ -313,6 +343,19 @@ namespace App.Ui.Tests
             }
 
             return value.Substring(0, maxLength) + "...";
+        }
+
+        /// <summary>
+        /// 走査対象が0件だった場合の失敗メッセージを組み立てる。RootGameObjectが画面
+        /// コンポーネント自身のtransform配下に無い（本ファイル冒頭コメントの前提が崩れている）
+        /// 可能性が最も高い原因のため、既定値で握りつぶさずここで検出する（フォールバック禁止）。
+        /// </summary>
+        private static string BuildNoTargetsFoundMessage(string targetKindLabel)
+        {
+            return $"検査対象の{targetKindLabel}が1件も見つからなかった。UiScreenBase.RootGameObject" +
+                "が画面コンポーネント自身のtransform配下に無い（BuildHierarchyでSetParent(transform, false)" +
+                "していない）可能性がある。この場合、はみ出し・preferred Width超過・タップ領域の各検出が" +
+                "サイレントに機能しなくなるため、既定値へ倒さずここで明示的に失敗させている。";
         }
 
         private static string BuildFailureMessage(string checkName, string aspectLabel, int width, int height, IReadOnlyList<string> offenders)
