@@ -1,0 +1,206 @@
+// UiScreenBase.cs.tmpl
+//
+// uGUI画面の共通基盤テンプレート。Build（階層生成・イベント登録、1回のみ）と
+// Render(state)（状態反映、何度でも）を分離する（5.4節手順2）。
+//
+// 画面ごとにこのクラスを継承し、<ScreenName>Screen として具体化する。継承先は
+// BuildHierarchy 内で UiFactory の生成関数を呼び、返された参照を継承先自身の
+// フィールドに保持する（不変条件6）。名前検索（GameObject.Find・transform.Find）
+// による再取得は行わない。
+//
+// onClick 等のイベント登録は BuildHierarchy でのみ行い、RenderXxx 系メソッドでは
+// 再登録しない（5.5節手順5）。RenderXxx は既存要素の表示・文言・活性状態の更新に
+// 限定する。
+//
+// 状態一覧（初期・読込中・空・エラー・無効・成功）は UiScreenState に対応する。
+// 未定義の値（列挙外の値をキャストして渡した場合等）は例外を投げず、Render が
+// 「空」表示（RenderEmpty）へ倒す（5.5節手順4）。これは「値が取得できない場合に
+// 既定値で握りつぶす」フォールバックではなく、状態表示という UX 要求そのものの
+// 既定分岐であることに注意する。
+//
+// Build 未実行のまま Render・Show・Hide を呼んだ場合は、既定値で握りつぶさず
+// InvalidOperationException を送出する（フォールバック禁止）。呼び出し順序の誤りは
+// 呼び出し側の実装不備であり、無言で無視すると原因特定を妨げる。
+//
+// UnityEditor 名前空間・OnGUI・AssetDatabase は参照しない（不変条件1）。
+// 本ファイルは MonoBehaviour 由来のフィールドと状態管理用の private フィールドの
+// みを持ち、書き換え可能な公開状態（グローバル変数）は公開しない。
+
+using System;
+using UnityEngine;
+
+namespace App.Ui
+{
+    /// <summary>
+    /// 画面が取りうる状態（5.3節手順4の状態一覧に対応）。
+    /// </summary>
+    public enum UiScreenState
+    {
+        /// <summary>初期表示。データ取得前・操作前の既定状態。</summary>
+        Initial = 0,
+
+        /// <summary>読込中。非同期処理の進行を示す。</summary>
+        Loading = 1,
+
+        /// <summary>空。対象データが0件であることを示す。未定義状態の既定の行き先でもある。</summary>
+        Empty = 2,
+
+        /// <summary>エラー。処理が失敗したことを示す。</summary>
+        Error = 3,
+
+        /// <summary>無効。操作を受け付けない状態であることを示す。</summary>
+        Disabled = 4,
+
+        /// <summary>成功。処理が完了し結果を表示できる状態であることを示す。</summary>
+        Success = 5,
+    }
+
+    /// <summary>
+    /// uGUI画面の共通基盤。Build（階層生成・イベント登録、1回のみ）と
+    /// Render(state)（状態反映、何度でも）を分離した骨格を提供する。
+    /// 画面ごとにこのクラスを継承する。
+    /// </summary>
+    public abstract class UiScreenBase : MonoBehaviour
+    {
+        private bool _isBuilt;
+        private UiScreenState _currentState = UiScreenState.Initial;
+
+        /// <summary>
+        /// 画面ルートのGameObject。BuildHierarchy内で必ず設定すること（不変条件6）。
+        /// Show・Hideはこの参照に対してのみ SetActive を行う。
+        /// </summary>
+        protected GameObject RootGameObject { get; set; }
+
+        /// <summary>Buildが完了しているか。</summary>
+        public bool IsBuilt => _isBuilt;
+
+        /// <summary>直近に Render へ渡された状態。</summary>
+        public UiScreenState CurrentState => _currentState;
+
+        /// <summary>
+        /// 画面の階層を1回だけ生成する。2回目以降の呼び出しは何もしない（多重生成・
+        /// 多重イベント登録を防ぐための冪等化であり、値の取得失敗を握りつぶす
+        /// フォールバックではない）。
+        /// </summary>
+        public void Build()
+        {
+            if (_isBuilt)
+            {
+                return;
+            }
+
+            BuildHierarchy();
+
+            if (RootGameObject == null)
+            {
+                throw new InvalidOperationException(
+                    "BuildHierarchy() が RootGameObject を設定しなかった。継承先で画面ルートの" +
+                    "GameObjectを必ず RootGameObject に代入すること。");
+            }
+
+            _isBuilt = true;
+        }
+
+        /// <summary>
+        /// 画面の階層を生成し、onClick 等のイベントを登録する。継承先で実装する。
+        /// UiFactory の各関数が返す参照は継承先のフィールドに保持し、名前検索で
+        /// 取り直さない（不変条件6）。イベント登録はここで1回だけ行い、RenderXxx 系
+        /// メソッドでは再登録しない（5.5節手順5）。実装の最後に RootGameObject へ
+        /// 画面ルートのGameObjectを代入すること。
+        /// </summary>
+        protected abstract void BuildHierarchy();
+
+        /// <summary>
+        /// 状態を反映する。既存要素の表示・文言・活性状態の更新のみを行い、要素の
+        /// 再生成やイベントの再登録は行わない。Build 未実行での呼び出しは
+        /// InvalidOperationException を送出する。
+        /// </summary>
+        public void Render(UiScreenState state)
+        {
+            if (!_isBuilt)
+            {
+                throw new InvalidOperationException(
+                    "Build() が未実行の状態で Render() が呼ばれた。先に Build() を1回呼ぶこと。");
+            }
+
+            _currentState = state;
+
+            switch (state)
+            {
+                case UiScreenState.Initial:
+                    RenderInitial();
+                    break;
+                case UiScreenState.Loading:
+                    RenderLoading();
+                    break;
+                case UiScreenState.Empty:
+                    RenderEmpty();
+                    break;
+                case UiScreenState.Error:
+                    RenderError();
+                    break;
+                case UiScreenState.Disabled:
+                    RenderDisabled();
+                    break;
+                case UiScreenState.Success:
+                    RenderSuccess();
+                    break;
+                default:
+                    // 未定義状態（列挙外の値）は例外にせず「空」表示に倒す（5.5節手順4）。
+                    RenderEmpty();
+                    break;
+            }
+        }
+
+        /// <summary>初期状態の反映。継承先で実装する。</summary>
+        protected abstract void RenderInitial();
+
+        /// <summary>読込中状態の反映。継承先で実装する。</summary>
+        protected abstract void RenderLoading();
+
+        /// <summary>
+        /// 空状態の反映。継承先で実装する。未定義状態も Render からここへ倒れるため、
+        /// 対象データが0件の場合の表示（UiTheme.Strings.EmptyList 等）を必ず実装すること。
+        /// </summary>
+        protected abstract void RenderEmpty();
+
+        /// <summary>エラー状態の反映。継承先で実装する。</summary>
+        protected abstract void RenderError();
+
+        /// <summary>無効状態の反映。継承先で実装する。</summary>
+        protected abstract void RenderDisabled();
+
+        /// <summary>成功状態の反映。継承先で実装する。</summary>
+        protected abstract void RenderSuccess();
+
+        /// <summary>
+        /// 画面ルートを表示する。Build 未実行での呼び出しは InvalidOperationException を
+        /// 送出する。
+        /// </summary>
+        public void Show()
+        {
+            if (!_isBuilt)
+            {
+                throw new InvalidOperationException(
+                    "Build() が未実行の状態で Show() が呼ばれた。先に Build() を1回呼ぶこと。");
+            }
+
+            RootGameObject.SetActive(true);
+        }
+
+        /// <summary>
+        /// 画面ルートを非表示にする。Build 未実行での呼び出しは InvalidOperationException を
+        /// 送出する。
+        /// </summary>
+        public void Hide()
+        {
+            if (!_isBuilt)
+            {
+                throw new InvalidOperationException(
+                    "Build() が未実行の状態で Hide() が呼ばれた。先に Build() を1回呼ぶこと。");
+            }
+
+            RootGameObject.SetActive(false);
+        }
+    }
+}
