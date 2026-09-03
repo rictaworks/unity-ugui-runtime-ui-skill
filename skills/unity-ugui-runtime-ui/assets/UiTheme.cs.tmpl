@@ -1,0 +1,110 @@
+// UiTheme.cs.tmpl
+//
+// uGUIランタイムUIが参照する色・寸法・文字サイズ・文言をここに集約するテンプレート（不変条件9）。
+// 画面ごとに個別の値が必要な場合は、このファイルをコピーして画面用のUiThemeとして拡張する。
+// 個々のコンポーネント実装からは必ずこのクラスの定数を参照し、色・寸法・文字サイズ・文言の
+// リテラルを直接書かない。
+//
+// 本ファイルは静的クラスと不変（readonly/const）な定数のみで構成する。
+// 実行中に書き換わる公開状態（禁止されているグローバル変数）は持たない。
+
+using UnityEngine;
+
+namespace App.Ui
+{
+    /// <summary>
+    /// uGUI画面が参照する色・寸法・文字サイズ・文言の既定値。
+    /// すべて static readonly／const で定義し、実行時に変更しない設計トークンとして扱う。
+    /// </summary>
+    public static class UiTheme
+    {
+        /// <summary>
+        /// 色。既定配色はすべて、想定される組み合わせでコントラスト比4.5以上
+        /// （WCAG 2.1 AA・通常テキスト基準）を満たす（不変条件10）。
+        /// 比率はsRGB相対輝度から算出： contrast = (L_light + 0.05) / (L_dark + 0.05)。
+        /// 配色を変更した場合は必ず scripts/check_contrast.py で再検証すること。
+        /// </summary>
+        public static class Colors
+        {
+            // --- 背景色 ---
+            public static readonly Color32 BackgroundPrimary = new Color32(0x1E, 0x1E, 0x1E, 0xFF);   // #1E1E1E
+            public static readonly Color32 BackgroundSecondary = new Color32(0x2A, 0x2A, 0x2A, 0xFF);  // #2A2A2A（パネル等の階層表現用）
+
+            // --- 前景色（本文） ---
+            // ForegroundPrimary on BackgroundPrimary   ≈ 14.89:1
+            // ForegroundPrimary on BackgroundSecondary ≈ 12.82:1
+            public static readonly Color32 ForegroundPrimary = new Color32(0xF2, 0xF2, 0xF2, 0xFF);   // #F2F2F2
+
+            // ForegroundSecondary on BackgroundPrimary ≈ 7.95:1（補助テキスト・キャプション用）
+            public static readonly Color32 ForegroundSecondary = new Color32(0xB3, 0xB3, 0xB3, 0xFF); // #B3B3B3
+
+            // --- 強調色（主要アクション用） ---
+            // OnAccent on Accent ≈ 6.66:1（Accent背景の上に文字を置く場合は必ずOnAccentを使う）
+            public static readonly Color32 Accent = new Color32(0x4D, 0xA3, 0xFF, 0xFF);   // #4DA3FF
+            public static readonly Color32 OnAccent = new Color32(0x0A, 0x1A, 0x2E, 0xFF); // #0A1A2E
+
+            // --- 無効状態 ---
+            // Disabled on BackgroundPrimary ≈ 3.13:1
+            // 無効要素はWCAGのコントラスト対象外（操作不可のため）だが、状態を色だけで
+            // 区別してはならない（不変条件10）。透過度・アイコン・ラベル変更を併用すること。
+            public static readonly Color32 Disabled = new Color32(0x6B, 0x6B, 0x6B, 0xFF); // #6B6B6B
+
+            // --- エラー ---
+            // Error on BackgroundPrimary ≈ 6.01:1
+            public static readonly Color32 Error = new Color32(0xFF, 0x6B, 0x6B, 0xFF); // #FF6B6B
+
+            // --- 成功 ---
+            // Success on BackgroundPrimary ≈ 8.28:1
+            public static readonly Color32 Success = new Color32(0x6B, 0xCB, 0x77, 0xFF); // #6BCB77
+        }
+
+        /// <summary>
+        /// 寸法。参照解像度基準のピクセル値。
+        /// </summary>
+        public static class Sizes
+        {
+            // 押下可能要素のタップ領域は縦横ともこの値以上を確保する（不変条件10）。
+            public const float TapMinSize = 44f;
+
+            // 余白段階。要素間・内側余白は必ずこの段階から選び、リテラル値を直接書かない。
+            public const float SpacingXSmall = 4f;
+            public const float SpacingSmall = 8f;
+            public const float SpacingMedium = 16f;
+            public const float SpacingLarge = 24f;
+            public const float SpacingXLarge = 32f;
+
+            // 角丸半径（9分割スプライト生成時に使用）
+            public const float CornerRadiusSmall = 4f;
+            public const float CornerRadiusMedium = 8f;
+            public const float CornerRadiusLarge = 16f;
+        }
+
+        /// <summary>
+        /// 文字サイズ段階（ポイントではなくピクセル基準）。
+        /// 最小段階でも14px以上とし、可読性を確保する（不変条件10）。
+        /// </summary>
+        public static class TextSizes
+        {
+            public const int Caption = 14;
+            public const int Body = 16;
+            public const int Subtitle = 20;
+            public const int Title = 24;
+            public const int Headline = 32;
+        }
+
+        /// <summary>
+        /// 文言辞書。画面に表示する固定文言はここに集約し、コード内に文字列リテラルを直接書かない。
+        /// 既定では画面横断で再利用する語のみを持つ。画面固有の文言は複製先のUiTheme.Stringsに追加する。
+        /// </summary>
+        public static class Strings
+        {
+            public const string Confirm = "確認";
+            public const string Cancel = "キャンセル";
+            public const string Close = "閉じる";
+            public const string Retry = "再試行";
+            public const string Loading = "読み込み中…";
+            public const string ErrorGeneric = "エラーが発生しました。";
+            public const string EmptyList = "表示する項目がありません。";
+        }
+    }
+}
