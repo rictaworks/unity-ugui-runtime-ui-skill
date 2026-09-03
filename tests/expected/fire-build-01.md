@@ -64,4 +64,4 @@
 
 ## 参照ファイル読み込み（期待）
 
-ScrollRectを含み、構築モードで複数状態を扱うため、`references/layout.md`・`references/components.md`・`references/ux-checklist.md`・`references/text-and-fonts.md`（CJKのため）が読み込まれる。
+ScrollRectを含むため`references/layout.md`・`references/components.md`が、CJK文字を扱うため`references/text-and-fonts.md`が読み込まれる。`references/ux-checklist.md`の読み込み条件は「構築モードで画面を2つ以上扱うとき、レビューモードの常時」であり、本要求は在庫確認画面という単一画面の複数状態（読込中・空・エラー）を扱うものであって画面数は1つのため、この条件には該当せず読み込まれない。
