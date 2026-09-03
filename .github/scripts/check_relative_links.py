@@ -59,10 +59,12 @@ def check_file(md_path: Path, skill_dir: Path) -> list:
             resolved = (md_path.parent / target_path_str).resolve()
 
             try:
-                resolved.relative_to(skill_dir.resolve().parent)
+                # 境界は自スキルディレクトリ自身とする（他スキルディレクトリへの
+                # 越境リンクも「スキルディレクトリの外」として扱う）。
+                resolved.relative_to(skill_dir.resolve())
             except ValueError:
                 errors.append(
-                    f"{md_path}:{lineno}: 相対リンク `{raw_target}` がスキル"
+                    f"{md_path}:{lineno}: 相対リンク `{raw_target}` が自スキル"
                     "ディレクトリの外（1階層を超えて）を指している"
                 )
                 continue

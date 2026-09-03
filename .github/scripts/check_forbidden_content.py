@@ -51,7 +51,7 @@ _CREDENTIAL_PATTERNS: List[Tuple[str, "re.Pattern[str]"]] = [
         "generic_secret_assignment",
         re.compile(
             r"(?i)\b(api[_-]?key|secret|password|passwd|token|access[_-]?key)\b"
-            r"\s*[:=]\s*['\"][A-Za-z0-9/+_=.-]{8,}['\"]"
+            r"\s*[:=]\s*['\"]?[A-Za-z0-9/+_=.-]{8,}['\"]?"
         ),
     ),
 ]
@@ -100,8 +100,11 @@ def _load_forbidden_name_patterns() -> List["re.Pattern[str]"]:
 
 
 # --- 走査対象ファイル ---------------------------------------------------------
-
-_TEXT_SUFFIXES = {".md", ".py", ".tmpl", ".txt", ".json", ".yml", ".yaml", ".cs"}
+#
+# 拡張子による許可リストは設けない（`id_rsa`のような拡張子なしファイルや
+# `.pem`・`.key`・`.env`等、許可リストに列挙し漏れたファイル名が検査を
+# すり抜けることを避けるため）。バイナリファイルは`_read_text()`側の
+# UnicodeDecodeError捕捉で安全に読み飛ばす。
 
 
 def _iter_target_files():
@@ -110,8 +113,6 @@ def _iter_target_files():
     for skill_dir in sorted(p for p in SKILLS_DIR.iterdir() if p.is_dir()):
         for path in sorted(skill_dir.rglob("*")):
             if not path.is_file():
-                continue
-            if path.suffix.lower() not in _TEXT_SUFFIXES:
                 continue
             yield path
 
@@ -165,6 +166,15 @@ def check_host_specific_frontmatter_fields() -> List[str]:
 
 
 def main() -> int:
+    if not SKILLS_DIR.is_dir():
+        print("::error::skills/ が見つからない", file=sys.stderr)
+        return 1
+
+    skill_dirs = sorted(p for p in SKILLS_DIR.iterdir() if p.is_dir())
+    if not skill_dirs:
+        print("::error::skills/ 配下にスキルディレクトリが無い", file=sys.stderr)
+        return 1
+
     forbidden_name_patterns = _load_forbidden_name_patterns()
 
     all_errors: List[str] = []
