@@ -15,6 +15,10 @@ config/master.key
 #
 # PRIVATEリポジトリ：上の行をコメントアウトし、.claude/を丸ごとコミットする
 # （露出リスクが無く、クローン直後からsettings.json・agents・workflowsが動く。x-follower-gateで実施済み）
+#
+# 例外：.claude/skills はホスト設置用symlink（requirements.md 12.2節）。
+# 参照先の skills/unity-ugui-runtime-ui はすでに公開物（12.1節）のため除外しない。
+!.claude/skills
 
 # --- ノウハウ・非公開ディレクトリ（公開/非公開に関わらず常に除外） ---
 CLIENT/
