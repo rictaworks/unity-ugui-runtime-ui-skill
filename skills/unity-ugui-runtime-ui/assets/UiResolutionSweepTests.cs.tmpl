@@ -1,0 +1,331 @@
+// UiResolutionSweepTests.cs.tmpl
+//
+// 解像度スイープを行うPlay Modeテストの基底テンプレート（5.6節手順3・7.4節）。
+// 16:9・4:3・21:9・9:16 の4アスペクト比それぞれで対象画面（UiScreenBase継承クラス）を
+// 構築し、以下3種を検出する：
+//   1. 要素の画面外はみ出し（RectTransformの四隅がScreen外に出る）
+//   2. Textのpreferred Width超過（折り返し無し設定のTextが自身の矩形幅を超える）
+//   3. タップ領域44px未満（Selectable系要素の実画面サイズがUiTheme.Sizes.TapMinSize未満）
+//
+// 配置想定：Assets/Tests/PlayMode/UiResolutionSweepTests.cs
+// 同ディレクトリに Play Mode 用アセンブリ定義（.asmdef）を配置し、少なくとも
+// UnityEngine.TestRunner への参照を持たせること（Editor限定の場合はさらに
+// UnityEditor.TestRunner を追加し、"Test Assemblies" を含める）。本テンプレート自体は
+// アセンブリ定義ファイルを含まない。[UnityTest] 属性は UnityEngine.TestTools（テストランナー
+// パッケージ）に由来し、PlayModeテストとしてUnity Test Runnerウィンドウおよび
+// -runTests（batchmode）の双方から実行できる（scripts/unity_batch_compile.pyの検証段階、
+// 5.6節手順3を参照）。
+//
+// 本ファイルは抽象基底クラスとして提供する。画面ごとの具象テストクラスはこれを継承し、
+// ScreenUnderTestType にUiScreenBase継承クラスのSystem.Typeを返すことで対象を差し替える
+// （UiScreenBase.cs.tmplが画面ごとに継承されるのと同じ拡張方式）。テスト対象はUiFactoryで
+// 生成した参照をフィールドに保持している前提のため、本テンプレートはGameObject.Find・
+// transform.Findで要素を取り直さない（不変条件6）。
+//
+// Canvasは UiFactory.CreateCanvas がScreenSpaceOverlayで生成する前提（不変条件3）。
+// Overlayモードでは RectTransform.GetWorldCorners() の結果がそのままスクリーンピクセル座標に
+// 一致するため、本テンプレートは追加の座標変換なしに画面外判定・タップ領域判定を行う。
+//
+// UiScreenBase.RootGameObjectはprotectedであり、継承クラス以外（本テンプレートを含む）から
+// は参照できない。そのため本テンプレートは、具象クラスのBuildHierarchyがCanvas等の生成階層を
+// 画面コンポーネント自身のtransform配下（SetParent(transform, false)）に置く実装を前提とし、
+// GetComponentsInChildren の走査元を画面コンポーネントのGameObjectとする。この前提が成立
+// しない具象クラスに対して本テンプレートを適用する場合は、対象クラス側にRootGameObjectを
+// 公開する読み取り専用プロパティ（例：internal GameObject DebugRootGameObject => RootGameObject;）
+// を追加し、走査元をそちらへ差し替えること。UiScreenBase.cs.tmpl自体は参照専用であり本Issueの
+// 変更対象に含まない。
+//
+// RectMask2D・Maskの子孫（ScrollRectのContent等）は、クリップされる前提の要素であり
+// 画面外にはみ出すこと自体は不具合ではないため、はみ出し検出の対象から除外する
+// （5.4節手順4、ScrollRectのViewport/Content構成を参照）。
+//
+// Textのpreferred Width超過は、horizontalOverflowがWrap（折り返し）に設定されている
+// Textを対象外とする。Wrap設定時のpreferredWidthは「折り返さなかった場合に必要な幅」を
+// 返す仕様であり、正しく折り返されているTextでも矩形幅を超えるのが通常のため、それを
+// 誤検出しない（フォールバックではなく、Text APIの仕様に基づく除外条件であることに注意）。
+//
+// 値が取得できない・対象が見つからない場合に既定値へ倒すフォールバックは行わない。
+// 検出できた不備は必ずAssert.Failで報告し、検出ロジック自体の前提（Overlay Canvas・
+// UiScreenBase継承）が崩れている場合は例外を伝播させる。
+//
+// UnityEditor名前空間・OnGUI・AssetDatabaseは参照しない（不変条件1）。
+
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Text;
+using App.Ui;
+using NUnit.Framework;
+using UnityEngine;
+using UnityEngine.TestTools;
+using UnityEngine.UI;
+
+namespace App.Ui.Tests
+{
+    /// <summary>
+    /// 解像度スイープPlay Modeテストの基底クラス。画面ごとの具象テストクラスはこれを継承し、
+    /// <see cref="ScreenUnderTestType"/> で対象のUiScreenBase継承クラスを指定する。
+    /// </summary>
+    public abstract class UiResolutionSweepTestsBase
+    {
+        // 検査対象の4アスペクト比。参照解像度そのものではなく、実行時に想定される
+        // 画面サイズの代表値（5.6節手順3）。
+        private const int Ratio16x9Width = 1920;
+        private const int Ratio16x9Height = 1080;
+        private const int Ratio4x3Width = 1600;
+        private const int Ratio4x3Height = 1200;
+        private const int Ratio21x9Width = 2560;
+        private const int Ratio21x9Height = 1080;
+        private const int Ratio9x16Width = 1080;
+        private const int Ratio9x16Height = 1920;
+
+        private int _originalScreenWidth;
+        private int _originalScreenHeight;
+        private GameObject _screenGameObject;
+        private UiScreenBase _screenUnderTest;
+
+        /// <summary>
+        /// 検査対象の画面クラス（UiScreenBase継承）。継承先のテストクラスで実装する。
+        /// 例：protected override Type ScreenUnderTestType => typeof(TitleScreen);
+        /// </summary>
+        protected abstract Type ScreenUnderTestType { get; }
+
+        [SetUp]
+        public void SetUp()
+        {
+            _originalScreenWidth = Screen.width;
+            _originalScreenHeight = Screen.height;
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            if (_screenGameObject != null)
+            {
+                UnityEngine.Object.Destroy(_screenGameObject);
+                _screenGameObject = null;
+                _screenUnderTest = null;
+            }
+
+            // 実行環境（batchmode・実機）によってはSetResolutionが反映されないことがあるため、
+            // 反映された場合のみ元解像度へ戻す（フォールバックではなく後始末）。
+            Screen.SetResolution(_originalScreenWidth, _originalScreenHeight, false);
+        }
+
+        // --------------------------------------------------------------
+        // 検出1：要素の画面外はみ出し
+        // --------------------------------------------------------------
+
+        [UnityTest]
+        [TestCase(Ratio16x9Width, Ratio16x9Height, "16:9")]
+        [TestCase(Ratio4x3Width, Ratio4x3Height, "4:3")]
+        [TestCase(Ratio21x9Width, Ratio21x9Height, "21:9")]
+        [TestCase(Ratio9x16Width, Ratio9x16Height, "9:16")]
+        public IEnumerator Screen_DoesNotOverflowScreenBounds(int width, int height, string aspectLabel)
+        {
+            yield return BuildScreenAtResolution(width, height);
+
+            var offenders = new List<string>();
+            foreach (var rect in EnumerateCheckableRectTransforms(_screenGameObject.transform))
+            {
+                var screenRect = GetScreenSpaceRect(rect);
+                if (screenRect.xMin < 0f || screenRect.yMin < 0f
+                    || screenRect.xMax > width || screenRect.yMax > height)
+                {
+                    offenders.Add(FormatPath(rect) + $" rect=({screenRect.xMin:F1},{screenRect.yMin:F1})-({screenRect.xMax:F1},{screenRect.yMax:F1})");
+                }
+            }
+
+            Assert.IsEmpty(offenders, BuildFailureMessage("画面外はみ出し", aspectLabel, width, height, offenders));
+        }
+
+        // --------------------------------------------------------------
+        // 検出2：Textのpreferred Width超過
+        // --------------------------------------------------------------
+
+        [UnityTest]
+        [TestCase(Ratio16x9Width, Ratio16x9Height, "16:9")]
+        [TestCase(Ratio4x3Width, Ratio4x3Height, "4:3")]
+        [TestCase(Ratio21x9Width, Ratio21x9Height, "21:9")]
+        [TestCase(Ratio9x16Width, Ratio9x16Height, "9:16")]
+        public IEnumerator Screen_TextDoesNotExceedPreferredWidth(int width, int height, string aspectLabel)
+        {
+            yield return BuildScreenAtResolution(width, height);
+
+            var offenders = new List<string>();
+            foreach (var text in _screenGameObject.GetComponentsInChildren<Text>(includeInactive: false))
+            {
+                // Wrap設定時のpreferredWidthは矩形幅を超えるのが仕様どおりの挙動のため対象外
+                // （本ファイル冒頭コメント参照）。
+                if (text.horizontalOverflow == HorizontalWrapMode.Wrap)
+                {
+                    continue;
+                }
+
+                var rectTransform = (RectTransform)text.transform;
+                var availableWidth = rectTransform.rect.width;
+                if (text.preferredWidth > availableWidth)
+                {
+                    offenders.Add(FormatPath(rectTransform)
+                        + $" preferredWidth={text.preferredWidth:F1} rectWidth={availableWidth:F1} text=\"{Truncate(text.text, 20)}\"");
+                }
+            }
+
+            Assert.IsEmpty(offenders, BuildFailureMessage("Textのpreferred Width超過", aspectLabel, width, height, offenders));
+        }
+
+        // --------------------------------------------------------------
+        // 検出3：タップ領域44px未満
+        // --------------------------------------------------------------
+
+        [UnityTest]
+        [TestCase(Ratio16x9Width, Ratio16x9Height, "16:9")]
+        [TestCase(Ratio4x3Width, Ratio4x3Height, "4:3")]
+        [TestCase(Ratio21x9Width, Ratio21x9Height, "21:9")]
+        [TestCase(Ratio9x16Width, Ratio9x16Height, "9:16")]
+        public IEnumerator Screen_TapAreasMeetMinimumSize(int width, int height, string aspectLabel)
+        {
+            yield return BuildScreenAtResolution(width, height);
+
+            var offenders = new List<string>();
+            foreach (var selectable in _screenGameObject.GetComponentsInChildren<Selectable>(includeInactive: false))
+            {
+                if (!selectable.interactable)
+                {
+                    // 無効状態はタップ対象ではないため対象外（不変条件10は押下可能要素が対象）。
+                    continue;
+                }
+
+                var rectTransform = (RectTransform)selectable.transform;
+                var screenRect = GetScreenSpaceRect(rectTransform);
+                if (screenRect.width < UiTheme.Sizes.TapMinSize || screenRect.height < UiTheme.Sizes.TapMinSize)
+                {
+                    offenders.Add(FormatPath(rectTransform)
+                        + $" size=({screenRect.width:F1}x{screenRect.height:F1}) min={UiTheme.Sizes.TapMinSize:F0}");
+                }
+            }
+
+            Assert.IsEmpty(offenders, BuildFailureMessage("タップ領域44px未満", aspectLabel, width, height, offenders));
+        }
+
+        // --------------------------------------------------------------
+        // 共通ヘルパー
+        // --------------------------------------------------------------
+
+        /// <summary>
+        /// 指定解像度へ切り替えたうえで、ScreenUnderTestType の画面を1つ構築し、
+        /// Success状態まで反映してから返す。
+        /// </summary>
+        private IEnumerator BuildScreenAtResolution(int width, int height)
+        {
+            Screen.SetResolution(width, height, false);
+            // CanvasScalerの再計算・レイアウトの再構築を待つ。1フレームでは反映されない
+            // 環境があるため2フレーム待機する。
+            yield return null;
+            yield return null;
+
+            var screenType = ScreenUnderTestType;
+            if (screenType == null || !typeof(UiScreenBase).IsAssignableFrom(screenType))
+            {
+                throw new InvalidOperationException(
+                    "ScreenUnderTestType は UiScreenBase を継承した具象型を返すこと。");
+            }
+
+            _screenGameObject = new GameObject("ResolutionSweepTarget_" + screenType.Name);
+            _screenUnderTest = (UiScreenBase)_screenGameObject.AddComponent(screenType);
+            _screenUnderTest.Build();
+            _screenUnderTest.Render(UiScreenState.Success);
+            _screenUnderTest.Show();
+
+            yield return null;
+        }
+
+        /// <summary>
+        /// RectMask2D・Maskの子孫を除いた、はみ出し検査対象のRectTransformを列挙する
+        /// （クリップされる要素は画面外にはみ出すこと自体が正常なため）。
+        /// </summary>
+        private static IEnumerable<RectTransform> EnumerateCheckableRectTransforms(Transform root)
+        {
+            foreach (var rectTransform in root.GetComponentsInChildren<RectTransform>(includeInactive: false))
+            {
+                if (rectTransform.GetComponent<Graphic>() == null)
+                {
+                    // 描画を持たないコンテナ（レイアウト用の空RectTransform等）は検査対象外。
+                    continue;
+                }
+
+                if (HasMaskedAncestor(rectTransform))
+                {
+                    continue;
+                }
+
+                yield return rectTransform;
+            }
+        }
+
+        private static bool HasMaskedAncestor(RectTransform rectTransform)
+        {
+            var current = rectTransform.parent;
+            while (current != null)
+            {
+                if (current.GetComponent<RectMask2D>() != null || current.GetComponent<Mask>() != null)
+                {
+                    return true;
+                }
+
+                current = current.parent;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Screen Space - Overlay の Canvas 配下であることを前提に、RectTransformの
+        /// スクリーンピクセル座標での矩形を返す（本ファイル冒頭コメント参照）。
+        /// </summary>
+        private static Rect GetScreenSpaceRect(RectTransform rectTransform)
+        {
+            var corners = new Vector3[4];
+            rectTransform.GetWorldCorners(corners);
+            var min = corners[0];
+            var max = corners[2];
+            return Rect.MinMaxRect(min.x, min.y, max.x, max.y);
+        }
+
+        private static string FormatPath(Component component)
+        {
+            var builder = new StringBuilder(component.name);
+            var current = component.transform.parent;
+            while (current != null)
+            {
+                builder.Insert(0, current.name + "/");
+                current = current.parent;
+            }
+
+            return builder.ToString();
+        }
+
+        private static string Truncate(string value, int maxLength)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
+            {
+                return value ?? string.Empty;
+            }
+
+            return value.Substring(0, maxLength) + "...";
+        }
+
+        private static string BuildFailureMessage(string checkName, string aspectLabel, int width, int height, IReadOnlyList<string> offenders)
+        {
+            var builder = new StringBuilder();
+            builder.Append(checkName).Append(" を検出（アスペクト比 ").Append(aspectLabel)
+                .Append(' ').Append(width).Append('x').Append(height).Append("）:\n");
+            foreach (var offender in offenders)
+            {
+                builder.Append("  - ").Append(offender).Append('\n');
+            }
+
+            return builder.ToString();
+        }
+    }
+}
