@@ -429,23 +429,34 @@ namespace App.Ui
             }
         }
 
-        /// <summary>
-        /// 縦スクロールのScrollRectを生成する。Viewportは RectMask2D のみを持ち
-        /// ContentSizeFitter は付与しない。Content は VerticalLayoutGroup と
-        /// ContentSizeFitter を自身に持つ（子には付与しない、不変条件4・5）。
-        /// 行の生成は呼び出し側が Content 配下に行う（50件超はプール設計を検討、5.4節手順4）。
-        /// </summary>
-        public static ScrollRectRefs CreateScrollRect(RectTransform parent, string name)
+        private readonly struct ScrollableContentRefs
         {
-            var go = new GameObject(name, typeof(RectTransform), typeof(ScrollRect));
-            var rect = (RectTransform)go.transform;
-            rect.SetParent(parent, false);
-            StretchFull(rect);
+            public readonly RectTransform Viewport;
+            public readonly RectTransform Content;
+            public readonly VerticalLayoutGroup ContentLayoutGroup;
+            public readonly ContentSizeFitter ContentSizeFitter;
 
+            public ScrollableContentRefs(RectTransform viewport, RectTransform content, VerticalLayoutGroup contentLayoutGroup, ContentSizeFitter contentSizeFitter)
+            {
+                Viewport = viewport;
+                Content = content;
+                ContentLayoutGroup = contentLayoutGroup;
+                ContentSizeFitter = contentSizeFitter;
+            }
+        }
+
+        /// <summary>
+        /// Viewport（RectMask2Dのみ）→ Content（VerticalLayoutGroup＋ContentSizeFitterを自身に持つ）
+        /// の2階層を生成する（不変条件4・5）。CreateScrollRect と CreateDropdown のテンプレートは
+        /// 同一構成を要求される（components.md「Dropdown」節）ため、設定漏れを防ぐためにここへ集約する。
+        /// 子への ContentSizeFitter の付与は行わない。生成する子の名前は "{name}Viewport" / "{name}Content"。
+        /// </summary>
+        private static ScrollableContentRefs CreateScrollableContent(RectTransform parent, string name)
+        {
             // Viewport：RectMask2Dのみ。LayoutGroupを持たないためContentSizeFitterは付与しない。
             var viewportGo = new GameObject(name + "Viewport", typeof(RectTransform), typeof(RectMask2D), typeof(Image));
             var viewportRect = (RectTransform)viewportGo.transform;
-            viewportRect.SetParent(rect, false);
+            viewportRect.SetParent(parent, false);
             StretchFull(viewportRect);
             var viewportImage = viewportGo.GetComponent<Image>();
             viewportImage.color = Color.clear; // マスク描画のためのみに存在し、可視背景は持たない。
@@ -473,14 +484,32 @@ namespace App.Ui
             contentSizeFitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
             contentSizeFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
+            return new ScrollableContentRefs(viewportRect, contentRect, contentLayoutGroup, contentSizeFitter);
+        }
+
+        /// <summary>
+        /// 縦スクロールのScrollRectを生成する。Viewportは RectMask2D のみを持ち
+        /// ContentSizeFitter は付与しない。Content は VerticalLayoutGroup と
+        /// ContentSizeFitter を自身に持つ（子には付与しない、不変条件4・5）。
+        /// 行の生成は呼び出し側が Content 配下に行う（50件超はプール設計を検討、5.4節手順4）。
+        /// </summary>
+        public static ScrollRectRefs CreateScrollRect(RectTransform parent, string name)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(ScrollRect));
+            var rect = (RectTransform)go.transform;
+            rect.SetParent(parent, false);
+            StretchFull(rect);
+
+            var scrollable = CreateScrollableContent(rect, name);
+
             var scrollRect = go.GetComponent<ScrollRect>();
-            scrollRect.viewport = viewportRect;
-            scrollRect.content = contentRect;
+            scrollRect.viewport = scrollable.Viewport;
+            scrollRect.content = scrollable.Content;
             scrollRect.horizontal = false;
             scrollRect.vertical = true;
             scrollRect.movementType = ScrollRect.MovementType.Clamped;
 
-            return new ScrollRectRefs(go, scrollRect, viewportRect, contentRect, contentLayoutGroup, contentSizeFitter);
+            return new ScrollRectRefs(go, scrollRect, scrollable.Viewport, scrollable.Content, scrollable.ContentLayoutGroup, scrollable.ContentSizeFitter);
         }
 
         // ------------------------------------------------------------------
@@ -605,29 +634,13 @@ namespace App.Ui
             var templateBackground = templateGo.GetComponent<Image>();
             templateBackground.color = UiTheme.Colors.BackgroundSecondary;
 
-            var viewportGo = new GameObject(name + "TemplateViewport", typeof(RectTransform), typeof(RectMask2D), typeof(Image));
-            var viewportRect = (RectTransform)viewportGo.transform;
-            viewportRect.SetParent(templateRect, false);
-            StretchFull(viewportRect);
-            viewportGo.GetComponent<Image>().color = Color.clear;
-
-            var contentGo = new GameObject(name + "TemplateContent", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
-            var contentRect = (RectTransform)contentGo.transform;
-            contentRect.SetParent(viewportRect, false);
-            contentRect.anchorMin = new Vector2(0f, 1f);
-            contentRect.anchorMax = new Vector2(1f, 1f);
-            contentRect.pivot = new Vector2(0.5f, 1f);
-            contentRect.sizeDelta = Vector2.zero;
-
-            var contentLayoutGroup = contentGo.GetComponent<VerticalLayoutGroup>();
-            contentLayoutGroup.childForceExpandWidth = true;
-            contentLayoutGroup.childForceExpandHeight = false;
-            contentLayoutGroup.childControlWidth = true;
-            contentLayoutGroup.childControlHeight = false;
-
-            var contentSizeFitter = contentGo.GetComponent<ContentSizeFitter>();
-            contentSizeFitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
-            contentSizeFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            // CreateScrollRectと同一構成（Viewport→Content）を共通ヘルパーで生成する
+            // （components.md「Dropdown」節：ScrollRectの構成をそのまま要求される）。
+            var scrollable = CreateScrollableContent(templateRect, name + "Template");
+            var viewportRect = scrollable.Viewport;
+            var contentRect = scrollable.Content;
+            var contentLayoutGroup = scrollable.ContentLayoutGroup;
+            var contentSizeFitter = scrollable.ContentSizeFitter;
 
             var templateScrollRect = templateGo.GetComponent<ScrollRect>();
             templateScrollRect.viewport = viewportRect;
