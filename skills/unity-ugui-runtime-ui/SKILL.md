@@ -122,7 +122,7 @@ Unity（WebGL）のuGUIによるユーザーインターフェースを、Editor
 **手順**
 
 1. **静的検査**（全段階共通）：`scripts/lint_ugui_csharp.py`で禁止パターン・必須構成（`EventSystem`生成、`CanvasScaler`設定、ScrollRect構成、`ContentSizeFitter`の配置）を検査する。`scripts/check_contrast.py`でテーマの前景・背景の組み合わせを検査する。
-2. **CLI段階**（`UNITY_PATH`あり）：`scripts/unity_batch_compile.py`が`-batchmode -nographics -quit -executeMethod`でコンパイルと`UiBatchCompileCheck`を実行し、ログの`error CS`を検出する。失敗時は原因箇所を修正し、同一手順を再実行する（上限3回）。
+2. **CLI段階**（`UNITY_PATH`あり）：`scripts/unity_batch_compile.py`を`--execute-method`を明示して呼び出す（既定値は無い。`{{PROJECT_NAMESPACE}}`をF4で確定した実際の名前空間に置換した完全修飾メソッド名——例: `MyProject.EditorTools.UiBatchCompileCheck.CompileAndTest`——を渡すこと。未指定・プレースホルダー未展開のままではサブプロセスを起動せずエラーで停止する）。`-batchmode -nographics -quit -executeMethod`でコンパイルと`UiBatchCompileCheck`を実行し、`UiBatchCompileCheck.cs.tmpl`が設定する終了コード（0=成功／1=コンパイル失敗／2=テスト失敗／3=テスト未実施）で成否を判定する（ログの`error CS`はコンパイル失敗時の詳細情報としてのみ用いる）。失敗時は原因箇所を修正し、同一手順を再実行する（上限3回）。
 3. **解像度スイープ**（CLI段階のみ）：Play Modeテスト`UiResolutionSweepTests`が16:9・4:3・21:9・9:16の各比率で画面を構築し、要素の画面外はみ出し、`Text`の`preferredWidth`超過、タップ領域の下限割れを検出する。
 4. **未検証の明示**：静的検査段階に留まった場合、報告の「検証段階と結果」に「CLIコンパイル未実施」「解像度スイープ未実施」を明記する。実施していない検証を実施済みとして報告しない（不変条件12）。
 5. 検証結果を返す。

@@ -9,6 +9,7 @@ import importlib.util
 import os
 import sys
 import unittest
+from unittest import mock
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", ".."))
@@ -211,6 +212,130 @@ class BuildUnityCommandTest(unittest.TestCase):
         self.assertIn("UiBatchCompileCheck.Run", command)
         self.assertIn("-logFile", command)
         self.assertIn("/tmp/log.txt", command)
+
+
+class ExecuteMethodValidationTest(unittest.TestCase):
+    """不具合3の修正：DEFAULT_EXECUTE_METHODが実テンプレートのエントリポイントと一致しない問題。
+
+    PROJECT_NAMESPACEはプロジェクト固有のプレースホルダーであり、スクリプト側で
+    決め打ちできない。既定値はNoneとし、CLI段階でexecute_methodが未指定・未展開の
+    場合は例外を投げず、サブプロセスを起動せずに明確な理由コード付きで失敗を返す。
+    """
+
+    def test_default_execute_method_is_none(self):
+        # 実テンプレートのエントリポイントは {{PROJECT_NAMESPACE}}.EditorTools.UiBatchCompileCheck.CompileAndTest
+        # であり、名前空間はプロジェクトごとに異なるため、決め打ちのデフォルト値を持てない。
+        self.assertIsNone(ubc.DEFAULT_EXECUTE_METHOD)
+
+    def test_cli_stage_without_execute_method_fails_without_running_subprocess(self):
+        with mock.patch.object(
+            ubc,
+            "determine_verification_stage",
+            return_value=(ubc.STAGE_CLI, "/opt/unity/Unity", None),
+        ), mock.patch.object(ubc.subprocess, "run") as mock_run:
+            result = ubc.run_unity_batch_compile("/dummy/project")  # execute_method未指定
+
+        mock_run.assert_not_called()
+        self.assertEqual(result.stage, ubc.STAGE_CLI)
+        self.assertFalse(result.success)
+        self.assertEqual(result.reason, ubc.REASON_EXECUTE_METHOD_NOT_SPECIFIED)
+
+    def test_cli_stage_with_unresolved_placeholder_fails_without_running_subprocess(self):
+        with mock.patch.object(
+            ubc,
+            "determine_verification_stage",
+            return_value=(ubc.STAGE_CLI, "/opt/unity/Unity", None),
+        ), mock.patch.object(ubc.subprocess, "run") as mock_run:
+            result = ubc.run_unity_batch_compile(
+                "/dummy/project",
+                execute_method="{{PROJECT_NAMESPACE}}.EditorTools.UiBatchCompileCheck.CompileAndTest",
+            )
+
+        mock_run.assert_not_called()
+        self.assertEqual(result.stage, ubc.STAGE_CLI)
+        self.assertFalse(result.success)
+        self.assertEqual(result.reason, ubc.REASON_EXECUTE_METHOD_PLACEHOLDER_UNRESOLVED)
+
+    def test_static_only_stage_does_not_require_execute_method(self):
+        # UNITY_PATH未設定なら、execute_method未指定でも既存どおりstatic-onlyの結果を返す
+        # （呼び出し側の既存の使い方を壊さない）。
+        result = ubc.run_unity_batch_compile("/dummy/project", env={})
+        self.assertEqual(result.stage, ubc.STAGE_STATIC_ONLY)
+        self.assertIsNone(result.success)
+
+
+class RunUnityBatchCompileExitCodeTest(unittest.TestCase):
+    """不具合4の修正：成否判定はsubprocessのreturncodeを主軸に行う。
+
+    UiBatchCompileCheck.cs.tmpl の終了コード規約
+    （0=成功／1=コンパイル失敗／2=テスト失敗／3=テスト未実施）に対応する。
+    テスト失敗・テスト未実施のログには "error CS" という文字列が含まれないため、
+    ログ正規表現だけに頼ると誤って成功と判定してしまう（修正前の不具合）。
+    """
+
+    def _run_with_returncode(self, returncode, log_text=None):
+        def fake_run(command, timeout, check, stdout, stderr):
+            log_file_path = command[command.index("-logFile") + 1]
+            if log_text is not None:
+                with open(log_file_path, "w", encoding="utf-8") as f:
+                    f.write(log_text)
+            return mock.Mock(returncode=returncode)
+
+        with mock.patch.object(
+            ubc,
+            "determine_verification_stage",
+            return_value=(ubc.STAGE_CLI, "/opt/unity/Unity", None),
+        ), mock.patch.object(ubc.subprocess, "run", side_effect=fake_run) as mock_run:
+            result = ubc.run_unity_batch_compile(
+                "/dummy/project",
+                execute_method="Sample.EditorTools.UiBatchCompileCheck.CompileAndTest",
+            )
+        return result, mock_run
+
+    def test_returncode_0_is_success(self):
+        result, mock_run = self._run_with_returncode(0, log_text="Compilation succeeded.\n")
+        self.assertTrue(mock_run.called)
+        self.assertEqual(result.stage, ubc.STAGE_CLI)
+        self.assertTrue(result.success)
+        self.assertIsNone(result.reason)
+
+    def test_returncode_1_is_compile_failure(self):
+        log = "Assets/Scripts/Foo.cs(1,1): error CS0103: The name 'Bar' does not exist\n"
+        result, _ = self._run_with_returncode(1, log_text=log)
+        self.assertEqual(result.stage, ubc.STAGE_CLI)
+        self.assertFalse(result.success)
+        self.assertEqual(result.reason, ubc.REASON_COMPILE_FAILED)
+        self.assertTrue(result.errors)
+
+    def test_returncode_2_is_test_failure_even_without_error_cs_in_log(self):
+        # 不具合4の再現ケース：ログに "error CS" が無い（テスト失敗ログの実際の文言）
+        log = "PlayModeテストが失敗した。失敗数: 1\n"
+        result, _ = self._run_with_returncode(2, log_text=log)
+        self.assertEqual(result.stage, ubc.STAGE_CLI)
+        self.assertFalse(result.success)
+        self.assertEqual(result.reason, ubc.REASON_TEST_FAILURE)
+
+    def test_returncode_3_is_no_tests_executed_and_not_treated_as_success(self):
+        # 不具合4の再現ケース：ログに "error CS" が無い（テスト未実施ログの実際の文言）
+        log = "error: フィルタに一致するPlayModeテストが1件も無かった。テスト未実施として扱う。\n"
+        result, _ = self._run_with_returncode(3, log_text=log)
+        self.assertEqual(result.stage, ubc.STAGE_CLI)
+        self.assertFalse(result.success)
+        self.assertEqual(result.reason, ubc.REASON_NO_TESTS_EXECUTED)
+
+    def test_unexpected_returncode_is_treated_as_failure(self):
+        result, _ = self._run_with_returncode(99, log_text="")
+        self.assertEqual(result.stage, ubc.STAGE_CLI)
+        self.assertFalse(result.success)
+        self.assertEqual(result.reason, ubc.REASON_UNEXPECTED_EXIT_CODE)
+
+
+class MainArgumentParsingTest(unittest.TestCase):
+    """--execute-method が既定値を持たず、必須引数として扱われることを検証する。"""
+
+    def test_execute_method_is_required_argument(self):
+        with self.assertRaises(SystemExit):
+            ubc.main(["/dummy/project"])  # --execute-method 未指定
 
 
 if __name__ == "__main__":
