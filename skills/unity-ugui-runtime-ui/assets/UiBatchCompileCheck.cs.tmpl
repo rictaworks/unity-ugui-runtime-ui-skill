@@ -22,7 +22,10 @@
 //
 // 置換対象（{{ }} 部分）:
 //   {{PROJECT_NAMESPACE}}    ... 本プロジェクトの Editor ツール用名前空間
-//   {{TEST_ASSEMBLY_NAMES}}  ... 実行対象の Test Assembly 名（例: "Assets.Tests.PlayMode"）
+//   {{TEST_ASSEMBLY_NAMES}}  ... 実行対象の Test Assembly 名を並べたC#配列初期化子の中身
+//                                （例: "Assets.Tests.PlayMode", "Assets.Tests.PlayMode.More"）
+//                                このプレースホルダは既にダブルクォートで囲まれた文字列を
+//                                カンマ区切りで並べた形で置換すること（自身はクォートしない）。
 //
 // 注意:
 //   ・本ファイルは資格情報・メールアドレス・実在の個人名を含まない。
@@ -43,12 +46,14 @@ namespace {{PROJECT_NAMESPACE}}.EditorTools
     public static class UiBatchCompileCheck
     {
         // 実行対象の Test Assembly 名。プロジェクトのテストアセンブリ定義（.asmdef）に合わせて置換する。
-        private static readonly string[] TargetTestAssemblyNames = { "{{TEST_ASSEMBLY_NAMES}}" };
+        // プレースホルダは配列初期化子の中身として展開されるため、置換値自体をダブルクォートで囲むこと。
+        private static readonly string[] TargetTestAssemblyNames = { {{TEST_ASSEMBLY_NAMES}} };
 
         // シェル側（unity_batch_compile.py 相当）が成否判定に用いる終了コード。
         private const int ExitCodeSuccess = 0;
         private const int ExitCodeCompileError = 1;
         private const int ExitCodeTestFailure = 2;
+        private const int ExitCodeNoTestsExecuted = 3;
 
         /// <summary>
         /// -executeMethod から呼び出すエントリポイント。
@@ -85,16 +90,28 @@ namespace {{PROJECT_NAMESPACE}}.EditorTools
         /// <summary>
         /// TestRunnerApi のコールバックを受け、テスト完了時に
         /// Unity プロセスを終了コード付きで終了する。
+        /// フィルタに一致するテストが1件も無かった場合は「未実施」として扱い、
+        /// 成功として終了しない（不変条件12：実施していない検証を実施済みとしない）。
         /// </summary>
         private sealed class BatchTestCallbacks : ICallbacks
         {
+            private int testCaseCount;
+
             public void RunStarted(ITestAdaptor testsToRun)
             {
-                Debug.Log($"PlayModeテストを開始する。対象テスト数: {testsToRun.TestCaseCount}");
+                testCaseCount = testsToRun.TestCaseCount;
+                Debug.Log($"PlayModeテストを開始する。対象テスト数: {testCaseCount}");
             }
 
             public void RunFinished(ITestResultAdaptor result)
             {
+                if (testCaseCount == 0)
+                {
+                    Debug.LogError("error: フィルタに一致するPlayModeテストが1件も無かった。テスト未実施として扱う。TargetTestAssemblyNamesの指定を確認すること。");
+                    EditorApplication.Exit(ExitCodeNoTestsExecuted);
+                    return;
+                }
+
                 bool succeeded = result.TestStatus != TestStatus.Failed;
 
                 if (!succeeded)
