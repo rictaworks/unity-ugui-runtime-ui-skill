@@ -38,7 +38,11 @@ def build_package(skill_md_path: Path, out_dir: Path) -> Path:
         for file_path in files:
             # zip内のパスは `<skill-name>/...` に揃える（展開時にディレクトリが
             # そのまま`skills/`配下へ再配置できるようにするため）。
-            arcname = str(Path(skill_name) / file_path.relative_to(skill_dir))
+            # zip仕様のエントリ名は常に`/`区切りが規約であり、Windows上で
+            # `str(Path(...))`を使うと`\`区切りになってしまう（Unity・Linux/macOS
+            # 側の展開ツールがディレクトリ構造として認識できなくなる）ため、
+            # OSに依存せず常に`/`区切りになる`.as_posix()`を用いる。
+            arcname = (Path(skill_name) / file_path.relative_to(skill_dir)).as_posix()
             zf.write(file_path, arcname)
 
     return package_path
