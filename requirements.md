@@ -325,7 +325,11 @@ unity-ugui-runtime-ui-skill/
 │           └── report-template.md
 ├── tests/
 │   ├── prompts/                        # 発火・非発火・前提欠落・参照未読のテストプロンプト
-│   └── expected/                       # 期待結果（発火可否・停止可否・出力構造）
+│   ├── expected/                       # 期待結果（発火可否・停止可否・出力構造）
+│   └── scripts/                        # 静的検査・CLI検証スクリプトのユニットテスト
+│       ├── test_lint_ugui_csharp.py
+│       ├── test_check_contrast.py
+│       └── test_unity_batch_compile.py
 ├── docs/
 │   ├── spec.md                         # 本書
 │   ├── hosts.md                        # ホスト別の設置・挙動差の記録
