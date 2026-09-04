@@ -59,11 +59,12 @@ CodexとAntigravityは同じ `.agents/skills` を読むため、ワークスペ�
 
 | バージョン | `.skill` ハッシュ | 設置日 | 備考 |
 |---|---|---|---|
-| 0.1.0 | `sha256:9e453ae3aff69726883291da21228c27d95531852453f4ae120812492eaefe18` | 未設置 | [GitHub Release 0.1.0](https://github.com/rictaworks/unity-ugui-runtime-ui-skill/releases/tag/0.1.0) 添付の `unity-ugui-runtime-ui-0.1.0.skill`。各ホストへの設置（12.2節・13.3節5.）が行われた時点で「設置日」を追記する |
+| 0.1.0 | `sha256:9e453ae3aff69726883291da21228c27d95531852453f4ae120812492eaefe18` | 未設置 | [GitHub Release 0.1.0](https://github.com/rictaworks/unity-ugui-runtime-ui-skill/releases/tag/0.1.0) 添付の `unity-ugui-runtime-ui-0.1.0.skill`。各ホストへの設置（12.2節・13.3節5.）が行われた時点で「設置日」を追記する。**本番確認（2026-09-04）**：公開URLからダウンロードしSHA-256が上記と一致することを確認、展開して16ファイルの構成（`SKILL.md`・`assets/`6点・`references/`6点・`scripts/`3点）を確認、`scripts/`の3本（`lint_ugui_csharp.py`・`check_contrast.py`・`unity_batch_compile.py`）を展開後のパッケージ単体で実行し正常動作を確認した。ホスト側（Claude Code／Codex CLI／Antigravity）での実発火確認は未実施（次回月次監視で実施、上表参照） |
 
 ## 更新履歴
 
 | 日付 | 内容 |
 |---|---|
+| 2026-09-04 | 0.1.0 の本番確認（公開URLからのダウンロード・ハッシュ照合・展開構成確認・scripts/3本の単体実行）を実施し、配布済みバージョン対応表の備考へ記録 |
 | 2026-09-04 | 0.1.0 リリース。`.skill` ハッシュを配布済みバージョン対応表に記録 |
 | 2026-09-03 | 初版作成。設置先一覧・設置方法を requirements.md 2.3節・12.2節から反映。既知の挙動差なし |
