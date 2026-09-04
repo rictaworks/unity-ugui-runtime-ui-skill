@@ -30,7 +30,7 @@ CodexとAntigravityは同じ `.agents/skills` を読むため、ワークスペ�
 
 | ホスト | ワークスペースsymlink | 参照先解決 | 明示呼び出しの確認 |
 |---|---|---|---|
-| Claude Code | `.claude/skills/unity-ugui-runtime-ui` を設置済み | `skills/unity-ugui-runtime-ui` に解決することを確認済み | 未実施（次回月次監視で確認） |
+| Claude Code | `.claude/skills/unity-ugui-runtime-ui` を設置済み | `skills/unity-ugui-runtime-ui` に解決することを確認済み | **実施済み（2026-09-04・11/11件、結果は`tests/results/2026-09-04/claude-code.md`）**。発火・非発火・前提欠落・部分適用・レビュー・参照未読の全類型で期待通りの挙動を確認。テストラウンド固有の環境上の制約（フィクスチャのパッケージ不足・並行Unity CLI実行時のライセンスIPC待ち・ディレクトリスコープ版スキルの自動優先は未確認）は結果ファイル参照 |
 | Codex CLI | `.agents/skills`（ディレクトリ単位symlink）配下の `unity-ugui-runtime-ui` として到達可能 | `skills/` に解決することを確認済み | 未実施（次回月次監視で確認） |
 | Antigravity | 同上（`.agents/skills` を共有） | 同上 | 未実施（次回月次監視で確認） |
 
@@ -65,6 +65,7 @@ CodexとAntigravityは同じ `.agents/skills` を読むため、ワークスペ�
 
 | 日付 | 内容 |
 |---|---|
+| 2026-09-04 | Claude Codeホストでの明示呼び出し実発火確認を実施（11/11件、`tests/prompts/`全類型）。全件期待通りの挙動。結果を`tests/results/2026-09-04/claude-code.md`に記録し、上表の「実機確認状況」を更新 |
 | 2026-09-04 | 0.1.0 の本番確認（公開URLからのダウンロード・ハッシュ照合・展開構成確認・scripts/3本の単体実行）を実施し、配布済みバージョン対応表の備考へ記録 |
 | 2026-09-04 | 0.1.0 リリース。`.skill` ハッシュを配布済みバージョン対応表に記録 |
 | 2026-09-03 | 初版作成。設置先一覧・設置方法を requirements.md 2.3節・12.2節から反映。既知の挙動差なし |
